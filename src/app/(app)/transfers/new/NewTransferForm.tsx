@@ -4,7 +4,7 @@ import { useActionState, useEffect, useMemo, useState } from "react";
 import { createTransfer } from "../actions";
 
 type Project = { id: string; code: string; name: string };
-type Item = { id: string; code: string; description: string; unit: string; per_day_rate: number };
+type Item = { id: string; code: string; description: string; unit: string; per_day_rate: number; sub_group: string | null };
 type Line = { key: number; item_id: string; qty_sent: string; rate: string };
 
 let nextKey = 1;
@@ -79,7 +79,18 @@ export function NewTransferForm({
   const label = "flex flex-col gap-1 text-sm text-gray-600";
 
   return (
-    <form action={formAction} className="space-y-6">
+    <form
+      action={formAction}
+      // Prevent an accidental Enter keypress in any text/number field from
+      // submitting the form (which would reset the header fields). The user
+      // must click "Save & dispatch" explicitly.
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && e.target instanceof HTMLInputElement) {
+          e.preventDefault();
+        }
+      }}
+      className="space-y-6"
+    >
       <input type="hidden" name="lines" value={linesJson} />
 
       {/* Header */}
@@ -132,7 +143,7 @@ export function NewTransferForm({
             <input name="vehicle_no" className={field} placeholder="GJ 33 T 5158" />
           </label>
           <label className={label}>
-            LR no.
+            LR no. <span className="text-gray-400">(optional)</span>
             <input name="lr_no" className={field} />
           </label>
           <label className={label}>
@@ -144,11 +155,11 @@ export function NewTransferForm({
             <input type="date" name="eway_bill_date" className={field} />
           </label>
           <label className={label}>
-            Transporter
+            Transporter <span className="text-gray-400">(optional)</span>
             <input name="transporter_name" className={field} />
           </label>
           <label className={`${label} sm:col-span-2 lg:col-span-3`}>
-            Remarks
+            Remarks <span className="text-gray-400">(optional)</span>
             <input name="remarks" className={field} />
           </label>
         </div>
@@ -193,6 +204,7 @@ export function NewTransferForm({
                     {items.map((it) => (
                       <option key={it.id} value={it.id}>
                         {it.code} — {it.description}
+                        {it.sub_group ? ` · ${it.sub_group}` : ""}
                       </option>
                     ))}
                   </select>

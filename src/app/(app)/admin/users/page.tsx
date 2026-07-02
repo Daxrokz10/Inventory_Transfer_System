@@ -56,12 +56,10 @@ export default async function UsersPage() {
   const rows = (profiles ?? []) as unknown as ProfileRow[];
   const allProjects = projects ?? [];
 
-  let emailById = new Map<string, string>();
-  if (isSuperadmin) {
-    const admin = createAdminClient();
-    const { data: userList } = await admin.auth.admin.listUsers({ perPage: 1000 });
-    emailById = new Map((userList?.users ?? []).map((u) => [u.id, u.email ?? ""]));
-  }
+  // Any admin/superadmin reaching this page may see usernames (emails).
+  const admin = createAdminClient();
+  const { data: userList } = await admin.auth.admin.listUsers({ perPage: 1000 });
+  const emailById = new Map((userList?.users ?? []).map((u) => [u.id, u.email ?? ""]));
 
   return (
     <div className="max-w-4xl space-y-8">
@@ -80,27 +78,26 @@ export default async function UsersPage() {
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
                 <th className="py-2 pr-4">Name</th>
-                {isSuperadmin && <th className="py-2 pr-4">Email</th>}
+                <th className="py-2 pr-4">Username (email)</th>
                 <th className="py-2 pr-4">Role</th>
                 <th className="py-2 pr-4">Assigned site</th>
                 <th className="py-2 pr-4">Change site</th>
-                {isSuperadmin && <th className="py-2">Actions</th>}
+                <th className="py-2">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((p) => {
-                const canEdit = p.role === "supervisor" || (isSuperadmin && p.role === "admin");
-                const canManage = isSuperadmin && p.id !== user.id && p.role !== "superadmin";
+                const canEdit = p.role === "supervisor" || p.role === "admin";
+                // Admins & superadmins can manage any non-superadmin account except their own.
+                const canManage = p.id !== user.id && p.role !== "superadmin";
                 return (
                   <tr key={p.id} className="border-b border-gray-50">
                     <td className="py-2.5 pr-4 font-medium text-gray-800">
                       {p.full_name ?? <span className="text-gray-400">—</span>}
                     </td>
-                    {isSuperadmin && (
-                      <td className="py-2.5 pr-4 text-gray-600">
-                        {emailById.get(p.id) ?? <span className="text-gray-400">—</span>}
-                      </td>
-                    )}
+                    <td className="py-2.5 pr-4 text-gray-600">
+                      {emailById.get(p.id) || <span className="text-gray-400">—</span>}
+                    </td>
                     <td className="py-2.5 pr-4">
                       <RoleBadge role={p.role} />
                     </td>
@@ -118,17 +115,15 @@ export default async function UsersPage() {
                         />
                       )}
                     </td>
-                    {isSuperadmin && (
-                      <td className="py-2.5">
-                        {canManage && (
-                          <div className="flex items-center gap-3">
-                            <ChangeEmailForm userId={p.id} currentEmail={emailById.get(p.id) ?? ""} />
-                            <ChangePasswordForm userId={p.id} />
-                            <RemoveUserForm userId={p.id} />
-                          </div>
-                        )}
-                      </td>
-                    )}
+                    <td className="py-2.5">
+                      {canManage && (
+                        <div className="flex items-center gap-3">
+                          <ChangeEmailForm userId={p.id} currentEmail={emailById.get(p.id) ?? ""} />
+                          <ChangePasswordForm userId={p.id} />
+                          <RemoveUserForm userId={p.id} />
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 );
               })}

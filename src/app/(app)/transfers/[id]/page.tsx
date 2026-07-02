@@ -28,6 +28,12 @@ export default async function TransferDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
+  const { data: { user } } = await supabase.auth.getUser();
+  const { data: profile } = user
+    ? await supabase.from("profiles").select("role, home_project_id").eq("id", user.id).single()
+    : { data: null };
+  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+
   const { data: t } = await supabase
     .from("transfers")
     .select(
@@ -37,6 +43,9 @@ export default async function TransferDetailPage({
     .single();
 
   if (!t) notFound();
+
+  // Only the receiving site's store manager (or an admin/superadmin) may confirm receipt.
+  const canReceive = isAdmin || profile?.home_project_id === t.to_project_id;
 
   const { data: lines } = await supabase
     .from("transfer_lines")
@@ -57,7 +66,8 @@ export default async function TransferDetailPage({
     (s, r) => s + Number(r.qty_sent) * Number(r.rate ?? 0),
     0,
   );
-  const showReceive = t.status === "dispatched";
+  const showReceive = t.status === "dispatched" && canReceive;
+  const awaitingOther = t.status === "dispatched" && !canReceive;
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -171,6 +181,13 @@ export default async function TransferDetailPage({
             item: r.item,
           }))}
         />
+      )}
+
+      {awaitingOther && (
+        <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          In transit — only the receiving site
+          {to ? ` (${to.code})` : ""} or an administrator can confirm receipt.
+        </p>
       )}
     </div>
   );

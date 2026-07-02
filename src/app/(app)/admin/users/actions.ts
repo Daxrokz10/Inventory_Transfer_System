@@ -91,17 +91,35 @@ export async function assignSite(
   return null;
 }
 
+// Admins and superadmins may manage accounts, but never a superadmin account
+// (that keeps the top tier out of reach of regular admins).
+async function assertTargetManageable(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  user_id: string,
+): Promise<string | null> {
+  const { data: target } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user_id)
+    .single();
+  if (!target) return "User not found.";
+  if (target.role === "superadmin") return "Superadmin accounts cannot be modified here.";
+  return null;
+}
+
 export async function changePassword(
   _prev: string | null,
   formData: FormData,
 ): Promise<string | null> {
-  const { callerRole } = await getCallerRole();
-  if (callerRole !== "superadmin") return "Only superadmin can change passwords.";
+  const { supabase } = await getCallerRole();
 
   const user_id = String(formData.get("user_id") ?? "").trim();
   const password = String(formData.get("password") ?? "").trim();
   if (!user_id) return "Missing user reference.";
   if (password.length < 8) return "Password must be at least 8 characters.";
+
+  const guard = await assertTargetManageable(supabase, user_id);
+  if (guard) return guard;
 
   const admin = createAdminClient();
   const { error } = await admin.auth.admin.updateUserById(user_id, { password });
@@ -115,13 +133,15 @@ export async function changeEmail(
   _prev: string | null,
   formData: FormData,
 ): Promise<string | null> {
-  const { callerRole } = await getCallerRole();
-  if (callerRole !== "superadmin") return "Only superadmin can change emails.";
+  const { supabase } = await getCallerRole();
 
   const user_id = String(formData.get("user_id") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   if (!user_id) return "Missing user reference.";
   if (!email) return "Email is required.";
+
+  const guard = await assertTargetManageable(supabase, user_id);
+  if (guard) return guard;
 
   const admin = createAdminClient();
   const { error } = await admin.auth.admin.updateUserById(user_id, {
@@ -138,19 +158,14 @@ export async function deleteUser(
   _prev: string | null,
   formData: FormData,
 ): Promise<string | null> {
-  const { supabase, callerRole, callerId } = await getCallerRole();
-  if (callerRole !== "superadmin") return "Only superadmin can remove users.";
+  const { supabase, callerId } = await getCallerRole();
 
   const user_id = String(formData.get("user_id") ?? "").trim();
   if (!user_id) return "Missing user reference.";
   if (user_id === callerId) return "You cannot remove your own account.";
 
-  const { data: target } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user_id)
-    .single();
-  if (target?.role === "superadmin") return "Superadmin accounts cannot be removed here.";
+  const guard = await assertTargetManageable(supabase, user_id);
+  if (guard) return guard;
 
   const admin = createAdminClient();
   const { error } = await admin.auth.admin.deleteUser(user_id);

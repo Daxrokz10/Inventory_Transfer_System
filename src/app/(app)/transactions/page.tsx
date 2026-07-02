@@ -1,16 +1,33 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
-const typeStyles: Record<string, string> = {
-  OPENING: "bg-gray-100 text-gray-700",
-  PURCHASE: "bg-green-100 text-green-800",
-  RECEIVE_IN: "bg-blue-100 text-blue-800",
-  ISSUE_OUT: "bg-orange-100 text-orange-800",
-  ADJUSTMENT: "bg-violet-100 text-violet-800",
+// A "transaction" here is a stock transfer between sites. It is Open while the
+// material is in transit (dispatched) and Closed once the receiving site
+// confirms it (received / partial).
+const statusView: Record<string, { label: string; cls: string }> = {
+  dispatched: { label: "Open", cls: "bg-amber-100 text-amber-800" },
+  received: { label: "Closed", cls: "bg-green-100 text-green-800" },
+  partial: { label: "Closed", cls: "bg-green-100 text-green-800" },
+  draft: { label: "Draft", cls: "bg-gray-100 text-gray-700" },
+  cancelled: { label: "Cancelled", cls: "bg-red-100 text-red-700" },
 };
 
 const LIMIT = 500;
 
-type Search = { site?: string; item?: string; type?: string };
+type Search = { site?: string; status?: string };
+
+type Proj = { code: string; name: string } | null;
+type TransferRow = {
+  id: string;
+  challan_no: string | null;
+  transfer_date: string | null;
+  status: string;
+  from_project_id: string;
+  to_project_id: string;
+  from_project: Proj;
+  to_project: Proj;
+  transfer_lines: { qty_sent: number }[] | null;
+};
 
 export default async function TransactionsPage({
   searchParams,
@@ -20,34 +37,45 @@ export default async function TransactionsPage({
   const sp = await searchParams;
   const supabase = await createClient();
 
-  // scope: store managers only see their own site
+  // Scope: store managers only see transfers involving their own site.
   const { data: { user } } = await supabase.auth.getUser();
   const { data: profile } = user
-    ? await supabase.from("profiles").select("role, home_project_id").eq("id", user!.id).single()
+    ? await supabase.from("profiles").select("role, home_project_id").eq("id", user.id).single()
     : { data: null };
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
-  const scopedSite = isAdmin ? sp.site : profile?.home_project_id ?? "__none__";
+  const homeProjectId = profile?.home_project_id ?? null;
 
-  const [{ data: projects }, { data: items }] = await Promise.all([
-    supabase.from("projects").select("id, code, name").order("code"),
-    supabase.from("items").select("id, code, description").order("code"),
-  ]);
-
-  const projMap = new Map((projects ?? []).map((p) => [p.id, p]));
-  const itemMap = new Map((items ?? []).map((i) => [i.id, i]));
+  const { data: projects } = await supabase
+    .from("projects")
+    .select("id, code, name")
+    .order("code");
 
   let query = supabase
-    .from("ledger_entries")
-    .select("project_id, item_id, entry_type, signed_qty, doc_date, counterparty_project_id, source, reference")
-    .order("doc_date", { ascending: false, nullsFirst: false })
+    .from("transfers")
+    .select(
+      "id, challan_no, transfer_date, status, from_project_id, to_project_id, from_project:from_project_id(code, name), to_project:to_project_id(code, name), transfer_lines(qty_sent)",
+    )
+    .order("transfer_date", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(LIMIT);
 
-  if (scopedSite && scopedSite !== "__none__") query = query.eq("project_id", scopedSite);
-  if (sp.item) query = query.eq("item_id", sp.item);
-  if (sp.type) query = query.eq("entry_type", sp.type);
+  // Store managers: only transfers where their site is sender or receiver.
+  let scopedOut = false;
+  if (!isAdmin) {
+    if (homeProjectId) {
+      query = query.or(`from_project_id.eq.${homeProjectId},to_project_id.eq.${homeProjectId}`);
+    } else {
+      scopedOut = true; // no home site assigned → nothing to show
+    }
+  } else if (sp.site) {
+    query = query.or(`from_project_id.eq.${sp.site},to_project_id.eq.${sp.site}`);
+  }
 
-  const { data: rows } = scopedSite === "__none__" ? { data: [] } : await query;
-  const entries = rows ?? [];
+  if (sp.status === "open") query = query.eq("status", "dispatched");
+  else if (sp.status === "closed") query = query.in("status", ["received", "partial"]);
+
+  const { data } = scopedOut ? { data: [] } : await query;
+  const rows = (data ?? []) as unknown as TransferRow[];
 
   const selCls =
     "rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
@@ -57,8 +85,9 @@ export default async function TransactionsPage({
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
         <p className="mt-1 text-sm text-gray-500">
-          Every signed stock movement — openings, purchases, transfers in/out and adjustments.
-          {entries.length >= LIMIT && ` Showing latest ${LIMIT}.`}
+          Material transfers between sites. A transfer is <span className="font-medium text-amber-700">Open</span>{" "}
+          while in transit and <span className="font-medium text-green-700">Closed</span> once the receiving site confirms it.
+          {rows.length >= LIMIT && ` Showing latest ${LIMIT}.`}
         </p>
       </div>
 
@@ -76,21 +105,11 @@ export default async function TransactionsPage({
           </label>
         )}
         <label className="flex flex-col gap-1 text-xs text-gray-500">
-          Item
-          <select name="item" defaultValue={sp.item ?? ""} className={selCls}>
-            <option value="">All items</option>
-            {(items ?? []).map((i) => (
-              <option key={i.id} value={i.id}>{i.code} — {i.description}</option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-gray-500">
-          Type
-          <select name="type" defaultValue={sp.type ?? ""} className={selCls}>
-            <option value="">All types</option>
-            {Object.keys(typeStyles).map((t) => (
-              <option key={t} value={t}>{t}</option>
-            ))}
+          Status
+          <select name="status" defaultValue={sp.status ?? ""} className={selCls}>
+            <option value="">All</option>
+            <option value="open">Open (in transit)</option>
+            <option value="closed">Closed (received)</option>
           </select>
         </label>
         <button className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
@@ -102,53 +121,57 @@ export default async function TransactionsPage({
       </form>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-        {entries.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="p-6 text-sm text-gray-500">
-            No transactions match. Openings, transfers and imported history will appear here.
+            No transfers to show yet. Once you dispatch material it will appear here as Open, then Closed after it is received.
           </p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
                 <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Site</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3">Item</th>
+                <th className="px-4 py-3">Challan</th>
+                <th className="px-4 py-3">From</th>
+                <th className="px-4 py-3">To</th>
+                <th className="px-4 py-3 text-right">Items</th>
                 <th className="px-4 py-3 text-right">Qty</th>
-                <th className="px-4 py-3">Counterparty</th>
-                <th className="px-4 py-3">Source</th>
+                <th className="px-4 py-3">Status</th>
               </tr>
             </thead>
             <tbody>
-              {entries.map((e, idx) => {
-                const site = projMap.get(e.project_id);
-                const item = itemMap.get(e.item_id);
-                const cp = e.counterparty_project_id ? projMap.get(e.counterparty_project_id) : null;
-                const q = Number(e.signed_qty);
+              {rows.map((t) => {
+                const from = t.from_project;
+                const to = t.to_project;
+                const lineCount = t.transfer_lines?.length ?? 0;
+                const totalQty = (t.transfer_lines ?? []).reduce((s, l) => s + Number(l.qty_sent), 0);
+                const sv = statusView[t.status] ?? { label: t.status, cls: "bg-gray-100" };
                 return (
-                  <tr key={idx} className="border-b border-gray-50 hover:bg-gray-50">
+                  <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="px-4 py-2.5 tabular-nums text-gray-600">
-                      {e.doc_date
-                        ? new Date(e.doc_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+                      {t.transfer_date
+                        ? new Date(t.transfer_date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
                         : "—"}
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span className="font-medium">{site?.code ?? "—"}</span>
+                    <td className="px-4 py-2.5 font-medium">
+                      <Link href={`/transfers/${t.id}`} className="text-blue-600 hover:underline">
+                        {t.challan_no ?? "—"}
+                      </Link>
                     </td>
                     <td className="px-4 py-2.5">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${typeStyles[e.entry_type] ?? "bg-gray-100"}`}>
-                        {e.entry_type}
+                      <span className="font-medium">{from?.code ?? "—"}</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="font-medium">{to?.code ?? "—"}</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">{lineCount}</td>
+                    <td className="px-4 py-2.5 text-right tabular-nums text-gray-600">
+                      {totalQty.toLocaleString("en-IN")}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${sv.cls}`}>
+                        {sv.label}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span className="font-medium">{item?.code}</span>
-                      <span className="ml-1.5 text-gray-500">{item?.description}</span>
-                    </td>
-                    <td className={`px-4 py-2.5 text-right font-medium tabular-nums ${q < 0 ? "text-orange-600" : "text-green-700"}`}>
-                      {q > 0 ? "+" : ""}{q.toLocaleString("en-IN")}
-                    </td>
-                    <td className="px-4 py-2.5 text-gray-500">{cp ? cp.code : "—"}</td>
-                    <td className="px-4 py-2.5 text-xs text-gray-400">{e.source}</td>
                   </tr>
                 );
               })}

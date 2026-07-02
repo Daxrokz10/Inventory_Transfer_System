@@ -100,6 +100,21 @@ export async function receiveTransfer(
   const transferId = String(formData.get("transfer_id") ?? "");
   if (!transferId) return "Missing transfer reference.";
 
+  // Only the receiving site's store manager (or an admin/superadmin) may confirm receipt.
+  const [{ data: profile }, { data: transfer }] = await Promise.all([
+    supabase.from("profiles").select("role, home_project_id").eq("id", user.id).single(),
+    supabase.from("transfers").select("to_project_id, status").eq("id", transferId).single(),
+  ]);
+  if (!transfer) return "Transfer not found.";
+  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isReceiver = profile?.home_project_id === transfer.to_project_id;
+  if (!isAdmin && !isReceiver) {
+    return "Only the receiving site or an administrator can confirm receipt.";
+  }
+  if (transfer.status !== "dispatched") {
+    return "This transfer is not awaiting receipt.";
+  }
+
   const { data: lines, error: lErr } = await supabase
     .from("transfer_lines")
     .select("id, qty_sent")

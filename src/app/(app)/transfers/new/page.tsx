@@ -12,7 +12,7 @@ export default async function NewTransferPage() {
       supabase.from("projects").select("id, code, name").order("code"),
       supabase
         .from("items")
-        .select("id, code, description, unit, per_day_rate")
+        .select("id, code, description, unit, per_day_rate, sub_group")
         .order("code"),
       user
         ? supabase
@@ -37,6 +37,7 @@ export default async function NewTransferPage() {
           ...i,
           unit: i.unit ?? "NOS",
           per_day_rate: Number(i.per_day_rate ?? 0),
+          sub_group: i.sub_group ?? null,
         }))}
         defaultFromProject={profile?.home_project_id ?? null}
       />
