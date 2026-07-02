@@ -187,7 +187,7 @@ export function NewTransferForm({
                   <select
                     value={l.item_id}
                     onChange={(e) => onItemChange(l.key, e.target.value)}
-                    className={field}
+                    className={`${field} min-w-0`}
                   >
                     <option value="">Select item…</option>
                     {items.map((it) => (
@@ -203,7 +203,7 @@ export function NewTransferForm({
                     value={l.qty_sent}
                     onChange={(e) => updateLine(l.key, { qty_sent: e.target.value })}
                     placeholder="Qty"
-                    className={`${field} text-right ${overDispatch ? "border-orange-400 ring-1 ring-orange-400" : ""}`}
+                    className={`${field} min-w-0 text-right`}
                   />
                   <input
                     type="number"
@@ -212,7 +212,7 @@ export function NewTransferForm({
                     value={l.rate}
                     onChange={(e) => updateLine(l.key, { rate: e.target.value })}
                     placeholder="Rate"
-                    className={`${field} text-right`}
+                    className={`${field} min-w-0 text-right`}
                   />
                   <span className="px-1 text-right text-sm tabular-nums text-gray-600">
                     {amount.toLocaleString("en-IN")}
@@ -241,18 +241,10 @@ export function NewTransferForm({
                         {fromProjectId ? "No stock record" : "Select a from-site first"}
                       </span>
                     ) : (
-                      <span
-                        className={
-                          onHand <= 0
-                            ? "font-medium text-red-600"
-                            : overDispatch
-                            ? "font-medium text-orange-600"
-                            : "text-green-700"
-                        }
-                      >
+                      <span className={onHand < 0 || overDispatch ? "font-medium text-blue-600" : "text-green-700"}>
                         Available:{" "}
                         {onHand.toLocaleString("en-IN")} {item?.unit ?? "NOS"}
-                        {overDispatch && " — quantity exceeds available stock"}
+                        {overDispatch && " — balance will go negative after this dispatch"}
                       </span>
                     )}
                   </div>

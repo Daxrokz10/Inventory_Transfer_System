@@ -9,7 +9,6 @@ const supervisorNav = [
   { href: "/masters/projects", label: "Closing Balance" },
   { href: "/transactions", label: "Transactions" },
   { href: "/transfers", label: "Transfers" },
-  { href: "/transfers/new", label: "New Transfer" },
   { href: "/inbox", label: "Receive Inbox" },
   { href: "/masters/items", label: "Items" },
 ];

@@ -7,7 +7,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 type CallerRole = "superadmin" | "admin" | "supervisor" | null;
 
-async function getCallerRole(): Promise<{ supabase: Awaited<ReturnType<typeof createClient>>; callerRole: CallerRole }> {
+async function getCallerRole(): Promise<{
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  callerRole: CallerRole;
+  callerId: string;
+}> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
@@ -21,7 +25,7 @@ async function getCallerRole(): Promise<{ supabase: Awaited<ReturnType<typeof cr
   const callerRole = (profile?.role ?? null) as CallerRole;
   if (callerRole !== "admin" && callerRole !== "superadmin") redirect("/dashboard");
 
-  return { supabase, callerRole };
+  return { supabase, callerRole, callerId: user.id };
 }
 
 export async function createUser(
@@ -81,6 +85,75 @@ export async function assignSite(
     .from("profiles")
     .update({ home_project_id })
     .eq("id", user_id);
+  if (error) return error.message;
+
+  revalidatePath("/admin/users");
+  return null;
+}
+
+export async function changePassword(
+  _prev: string | null,
+  formData: FormData,
+): Promise<string | null> {
+  const { callerRole } = await getCallerRole();
+  if (callerRole !== "superadmin") return "Only superadmin can change passwords.";
+
+  const user_id = String(formData.get("user_id") ?? "").trim();
+  const password = String(formData.get("password") ?? "").trim();
+  if (!user_id) return "Missing user reference.";
+  if (password.length < 8) return "Password must be at least 8 characters.";
+
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.updateUserById(user_id, { password });
+  if (error) return error.message;
+
+  revalidatePath("/admin/users");
+  return null;
+}
+
+export async function changeEmail(
+  _prev: string | null,
+  formData: FormData,
+): Promise<string | null> {
+  const { callerRole } = await getCallerRole();
+  if (callerRole !== "superadmin") return "Only superadmin can change emails.";
+
+  const user_id = String(formData.get("user_id") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim();
+  if (!user_id) return "Missing user reference.";
+  if (!email) return "Email is required.";
+
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.updateUserById(user_id, {
+    email,
+    email_confirm: true,
+  });
+  if (error) return error.message;
+
+  revalidatePath("/admin/users");
+  return null;
+}
+
+export async function deleteUser(
+  _prev: string | null,
+  formData: FormData,
+): Promise<string | null> {
+  const { supabase, callerRole, callerId } = await getCallerRole();
+  if (callerRole !== "superadmin") return "Only superadmin can remove users.";
+
+  const user_id = String(formData.get("user_id") ?? "").trim();
+  if (!user_id) return "Missing user reference.";
+  if (user_id === callerId) return "You cannot remove your own account.";
+
+  const { data: target } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user_id)
+    .single();
+  if (target?.role === "superadmin") return "Superadmin accounts cannot be removed here.";
+
+  const admin = createAdminClient();
+  const { error } = await admin.auth.admin.deleteUser(user_id);
   if (error) return error.message;
 
   revalidatePath("/admin/users");

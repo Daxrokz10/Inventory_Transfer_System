@@ -11,3 +11,13 @@ body {
   color: #111827; /* gray-900 */
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Native number spinners collide with right-aligned qty/rate values in narrow grid columns. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield;
+}

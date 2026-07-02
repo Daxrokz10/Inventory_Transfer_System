@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { CreateUserForm, AssignSiteForm } from "./UserForms";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { CreateUserForm, AssignSiteForm, ChangePasswordForm, ChangeEmailForm, RemoveUserForm } from "./UserForms";
 
 function RoleBadge({ role }: { role: string }) {
   const styles: Record<string, string> = {
@@ -55,6 +56,13 @@ export default async function UsersPage() {
   const rows = (profiles ?? []) as unknown as ProfileRow[];
   const allProjects = projects ?? [];
 
+  let emailById = new Map<string, string>();
+  if (isSuperadmin) {
+    const admin = createAdminClient();
+    const { data: userList } = await admin.auth.admin.listUsers({ perPage: 1000 });
+    emailById = new Map((userList?.users ?? []).map((u) => [u.id, u.email ?? ""]));
+  }
+
   return (
     <div className="max-w-4xl space-y-8">
       <div>
@@ -72,19 +80,27 @@ export default async function UsersPage() {
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
                 <th className="py-2 pr-4">Name</th>
+                {isSuperadmin && <th className="py-2 pr-4">Email</th>}
                 <th className="py-2 pr-4">Role</th>
                 <th className="py-2 pr-4">Assigned site</th>
-                <th className="py-2">Change site</th>
+                <th className="py-2 pr-4">Change site</th>
+                {isSuperadmin && <th className="py-2">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {rows.map((p) => {
                 const canEdit = p.role === "supervisor" || (isSuperadmin && p.role === "admin");
+                const canManage = isSuperadmin && p.id !== user.id && p.role !== "superadmin";
                 return (
                   <tr key={p.id} className="border-b border-gray-50">
                     <td className="py-2.5 pr-4 font-medium text-gray-800">
                       {p.full_name ?? <span className="text-gray-400">—</span>}
                     </td>
+                    {isSuperadmin && (
+                      <td className="py-2.5 pr-4 text-gray-600">
+                        {emailById.get(p.id) ?? <span className="text-gray-400">—</span>}
+                      </td>
+                    )}
                     <td className="py-2.5 pr-4">
                       <RoleBadge role={p.role} />
                     </td>
@@ -93,7 +109,7 @@ export default async function UsersPage() {
                         ? `${p.project.code} — ${p.project.name}`
                         : <span className="text-gray-400">Not assigned</span>}
                     </td>
-                    <td className="py-2.5">
+                    <td className="py-2.5 pr-4">
                       {canEdit && (
                         <AssignSiteForm
                           userId={p.id}
@@ -102,6 +118,17 @@ export default async function UsersPage() {
                         />
                       )}
                     </td>
+                    {isSuperadmin && (
+                      <td className="py-2.5">
+                        {canManage && (
+                          <div className="flex items-center gap-3">
+                            <ChangeEmailForm userId={p.id} currentEmail={emailById.get(p.id) ?? ""} />
+                            <ChangePasswordForm userId={p.id} />
+                            <RemoveUserForm userId={p.id} />
+                          </div>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}

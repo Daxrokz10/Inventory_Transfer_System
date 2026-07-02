@@ -1,7 +1,7 @@
 "use client";
 
-import { useActionState } from "react";
-import { createUser, assignSite } from "./actions";
+import { useActionState, useState } from "react";
+import { createUser, assignSite, changePassword, changeEmail, deleteUser } from "./actions";
 
 type Project = { id: string; code: string; name: string };
 
@@ -106,6 +106,138 @@ export function AssignSiteForm({
         className="rounded-lg bg-gray-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-60"
       >
         {pending ? "Saving…" : "Save"}
+      </button>
+      {error && <span className="text-xs text-red-600">{error}</span>}
+    </form>
+  );
+}
+
+export function ChangeEmailForm({ userId, currentEmail }: { userId: string; currentEmail: string }) {
+  const [open, setOpen] = useState(false);
+  const [error, action, pending] = useActionState(
+    async (prev: string | null, fd: FormData) => {
+      const result = await changeEmail(prev, fd);
+      if (!result) setOpen(false);
+      return result;
+    },
+    null,
+  );
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-xs font-medium text-blue-600 hover:underline"
+      >
+        Change email
+      </button>
+    );
+  }
+
+  return (
+    <form action={action} className="flex items-center gap-2">
+      <input type="hidden" name="user_id" value={userId} />
+      <input
+        name="email"
+        type="email"
+        required
+        defaultValue={currentEmail}
+        placeholder="New email"
+        className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs focus:outline-none"
+      />
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-lg bg-gray-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+      >
+        {pending ? "Saving…" : "Save"}
+      </button>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="text-xs text-gray-400 hover:text-gray-600"
+      >
+        Cancel
+      </button>
+      {error && <span className="text-xs text-red-600">{error}</span>}
+    </form>
+  );
+}
+
+export function ChangePasswordForm({ userId }: { userId: string }) {
+  const [open, setOpen] = useState(false);
+  const [error, action, pending] = useActionState(
+    async (prev: string | null, fd: FormData) => {
+      const result = await changePassword(prev, fd);
+      if (!result) setOpen(false);
+      return result;
+    },
+    null,
+  );
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="text-xs font-medium text-blue-600 hover:underline"
+      >
+        Change password
+      </button>
+    );
+  }
+
+  return (
+    <form action={action} className="flex items-center gap-2">
+      <input type="hidden" name="user_id" value={userId} />
+      <input
+        name="password"
+        type="password"
+        required
+        minLength={8}
+        placeholder="New password"
+        className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs focus:outline-none"
+      />
+      <button
+        type="submit"
+        disabled={pending}
+        className="rounded-lg bg-gray-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+      >
+        {pending ? "Saving…" : "Save"}
+      </button>
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="text-xs text-gray-400 hover:text-gray-600"
+      >
+        Cancel
+      </button>
+      {error && <span className="text-xs text-red-600">{error}</span>}
+    </form>
+  );
+}
+
+export function RemoveUserForm({ userId }: { userId: string }) {
+  const [error, action, pending] = useActionState(deleteUser, null);
+
+  return (
+    <form
+      action={action}
+      onSubmit={(e) => {
+        if (!confirm("Remove this user? This cannot be undone.")) {
+          e.preventDefault();
+        }
+      }}
+      className="flex items-center gap-2"
+    >
+      <input type="hidden" name="user_id" value={userId} />
+      <button
+        type="submit"
+        disabled={pending}
+        className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
+      >
+        {pending ? "Removing…" : "Remove"}
       </button>
       {error && <span className="text-xs text-red-600">{error}</span>}
     </form>
