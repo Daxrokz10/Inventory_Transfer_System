@@ -123,12 +123,12 @@ export default async function ChallanPage({
             </tr>
             <tr>
               <td className="border border-gray-800 p-1">
-                <span className="font-bold">Project Code TO</span>{" "}
-                {t.to_project_id ? (to?.code ?? "—") : "—"}
-              </td>
-              <td className="border border-gray-800 p-1">
                 <span className="font-bold">Project Code FROM</span>{" "}
                 {from?.code ?? "—"}
+              </td>
+              <td className="border border-gray-800 p-1">
+                <span className="font-bold">Project Code TO</span>{" "}
+                {t.to_project_id ? (to?.code ?? "—") : "—"}
               </td>
             </tr>
             <tr>
