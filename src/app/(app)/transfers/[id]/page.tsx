@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ReceiveForm } from "./ReceiveForm";
+import { DeleteTransferForm } from "./DeleteTransferForm";
 
 const statusStyles: Record<string, string> = {
   draft: "bg-gray-100 text-gray-700",
@@ -97,6 +98,12 @@ export default async function TransferDetailPage({
           >
             {t.status}
           </span>
+          {isAdmin && (
+            <DeleteTransferForm
+              transferId={id}
+              received={t.status === "received" || t.status === "partial"}
+            />
+          )}
         </div>
       </div>
 

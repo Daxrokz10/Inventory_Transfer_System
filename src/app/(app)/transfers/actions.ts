@@ -148,3 +148,40 @@ export async function receiveTransfer(
   revalidatePath("/dashboard");
   redirect(`/transfers/${transferId}`);
 }
+
+// Permanently delete a transfer (and its lines, via ON DELETE CASCADE).
+// Admin / superadmin only. Deleting reverses this transfer's stock effect:
+// the source regains what it issued, and — if it was received — the
+// destination loses what it received.
+export async function deleteTransfer(
+  _prev: string | null,
+  formData: FormData,
+): Promise<string | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  if (!isAdmin) return "Only an admin or superadmin can delete a transfer.";
+
+  const transferId = String(formData.get("transfer_id") ?? "").trim();
+  if (!transferId) return "Missing transfer reference.";
+
+  const { error } = await supabase.from("transfers").delete().eq("id", transferId);
+  if (error) return error.message;
+
+  revalidatePath("/transfers");
+  revalidatePath("/transactions");
+  revalidatePath("/inbox");
+  revalidatePath("/dashboard");
+  revalidatePath("/masters/projects");
+  revalidatePath("/masters/items");
+  redirect("/transfers");
+}

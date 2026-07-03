@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { SgcLogo } from "@/components/SgcLogo";
 import { PrintButton } from "@/components/PrintButton";
 
 const COMPANY = "SHREE GANESH CORPORATION";
@@ -9,7 +8,7 @@ const COMPANY_BRANCH = "NAVSARI";
 const PAN = "AALPL7464Q";
 const EMAIL = "info@shreeganeshcorp.com";
 const WEBSITE = "www.shreeganeshcorp.com";
-const MIN_ROWS = 25; // blank rows to fill like the original challan
+const MIN_ROWS = 16; // blank rows to fill like the original challan (kept low so it stays on one A4 page)
 
 function fmt(n: number) {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -74,7 +73,13 @@ export default async function ChallanPage({
       >
         {/* ── HEADER ── */}
         <div className="flex items-center gap-4 pb-2">
-          <SgcLogo size={72} />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/sgc-logo.png"
+            alt="Shree Ganesh Corporation"
+            height={72}
+            className="h-[72px] w-auto"
+          />
           <div>
             <h1
               className="text-4xl font-extrabold tracking-wide"
@@ -278,13 +283,30 @@ export default async function ChallanPage({
 
       <style>{`
         @media print {
+          @page { size: A4; margin: 8mm; }
+          /* Hide the app chrome so only the challan prints */
           .no-print { display: none !important; }
-          body { margin: 0; }
-          #challan {
-            width: 210mm;
-            padding: 12mm;
-            margin: 0 auto;
+          aside { display: none !important; }
+          main { padding: 0 !important; }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
           }
+          /* print backgrounds/colours (logo, maroon bars) exactly */
+          #challan, #challan * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          #challan {
+            width: auto !important;
+            min-height: 0 !important;   /* don't force a full-page box (avoids spilling to page 2) */
+            padding: 0 !important;      /* @page margin already provides the border */
+            margin: 0 !important;
+            box-shadow: none !important;
+          }
+          /* keep the challan together on one page */
+          #challan { page-break-inside: avoid; break-inside: avoid; }
         }
       `}</style>
     </>

@@ -15,6 +15,8 @@ const supervisorNav = [
 
 const adminNav = [
   ...supervisorNav,
+  { href: "/purchases", label: "Purchase" },
+  { href: "/masters/sites", label: "Sites" },
   { href: "/admin/users", label: "Users" },
 ];
 

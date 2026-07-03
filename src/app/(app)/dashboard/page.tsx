@@ -78,7 +78,7 @@ export default async function DashboardPage() {
     projectsRes,
   ] = await Promise.all([
     isAdmin
-      ? supabase.from("projects").select("*", { count: "exact", head: true })
+      ? supabase.from("projects").select("*", { count: "exact", head: true }).neq("code", "J-0000")
       : Promise.resolve({ count: homeProjectId ? 1 : 0 }),
     supabase.from("items").select("*", { count: "exact", head: true }),
     inTransitQuery,
@@ -98,11 +98,11 @@ export default async function DashboardPage() {
       { rate: Number(i.per_day_rate ?? 0), group: i.main_group ?? "Other" },
     ]),
   );
-  const projInfo = new Map(
-    ((projectsRes as { data: { id: string; code: string; name: string }[] | null }).data ?? []).map(
-      (p) => [p.id, `${p.code} — ${p.name}`],
-    ),
-  );
+  const projList =
+    (projectsRes as { data: { id: string; code: string; name: string }[] | null }).data ?? [];
+  const projInfo = new Map(projList.map((p) => [p.id, `${p.code} — ${p.name}`]));
+  // J-0000 is the reserved purchase source, not a real site.
+  const purchaseProjectId = projList.find((p) => p.code === "J-0000")?.id ?? null;
 
   let totalUnits = 0;
   let totalValue = 0;
@@ -110,6 +110,7 @@ export default async function DashboardPage() {
   const byGroup = new Map<string, { qty: number; value: number }>();
 
   for (const b of balances) {
+    if (b.project_id === purchaseProjectId) continue; // exclude purchase source
     const onHand = Number(b.on_hand ?? 0);
     if (onHand === 0) continue;
     const info = itemInfo.get(b.item_id);

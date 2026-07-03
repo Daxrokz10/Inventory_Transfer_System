@@ -23,6 +23,9 @@ export default async function NewTransferPage() {
         : Promise.resolve({ data: null }),
     ]);
 
+  // J-0000 is the reserved purchase source — not a real transfer site.
+  const sites = (projects ?? []).filter((p) => p.code !== "J-0000");
+
   return (
     <div className="max-w-4xl space-y-6">
       <div>
@@ -32,7 +35,7 @@ export default async function NewTransferPage() {
         </p>
       </div>
       <NewTransferForm
-        projects={projects ?? []}
+        projects={sites}
         items={(items ?? []).map((i) => ({
           ...i,
           unit: i.unit ?? "NOS",

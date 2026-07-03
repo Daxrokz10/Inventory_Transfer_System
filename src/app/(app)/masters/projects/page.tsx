@@ -32,6 +32,9 @@ export default async function ClosingBalancePage({
   const itemMap = new Map((items ?? []).map((i) => [i.id, i]));
   const projMap = new Map((projects ?? []).map((p) => [p.id, p]));
 
+  // J-0000 is the reserved purchase source, not a real site holding inventory.
+  const purchaseProjectId = (projects ?? []).find((p) => p.code === "J-0000")?.id ?? null;
+
   // main-group list for the filter
   const groups = [...new Set((items ?? []).map((i) => i.main_group).filter(Boolean))].sort() as string[];
 
@@ -40,6 +43,7 @@ export default async function ClosingBalancePage({
   const siteTotals = new Map<string, number>();
   const itemsWithStock = new Set<string>();
   for (const b of balances ?? []) {
+    if (b.project_id === purchaseProjectId) continue; // exclude purchase source
     const v = Number(b.on_hand);
     if (!v) continue;
     itemsWithStock.add(b.item_id);
