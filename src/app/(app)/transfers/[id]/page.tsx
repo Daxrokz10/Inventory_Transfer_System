@@ -50,7 +50,7 @@ export default async function TransferDetailPage({
 
   const { data: lines } = await supabase
     .from("transfer_lines")
-    .select("id, qty_sent, qty_received, rate, item:item_id(code, description, unit)")
+    .select("id, qty_sent, qty_received, rate, item:item_id(code, description, unit, sub_group)")
     .eq("transfer_id", id);
 
   const from = t.from_project as unknown as { code: string; name: string } | null;
@@ -60,7 +60,7 @@ export default async function TransferDetailPage({
     qty_sent: number;
     qty_received: number | null;
     rate: number;
-    item: { code: string; description: string; unit: string } | null;
+    item: { code: string; description: string; unit: string; sub_group: string | null } | null;
   }[];
 
   const total = rows.reduce(
@@ -141,6 +141,7 @@ export default async function TransferDetailPage({
                 <tr key={r.id} className="border-b border-gray-50">
                   <td className="py-2">
                     {r.item?.code} — {r.item?.description}
+                    {r.item?.sub_group ? ` · ${r.item.sub_group}` : ""}
                   </td>
                   <td className="py-2 text-right tabular-nums">
                     {Number(r.qty_sent).toLocaleString("en-IN")} {r.item?.unit}
