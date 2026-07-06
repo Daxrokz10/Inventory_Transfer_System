@@ -72,6 +72,11 @@ export default async function ClosingBalancePage({
   const th = "border border-gray-200 px-2 py-1.5 text-xs font-semibold text-gray-500 whitespace-nowrap";
   const td = "border border-gray-100 px-2 py-1 text-xs text-right tabular-nums whitespace-nowrap";
 
+  const exportParams = new URLSearchParams();
+  if (sp.group) exportParams.set("group", sp.group);
+  if (sp.q) exportParams.set("q", sp.q);
+  const exportHref = `/api/closing-balance/export${exportParams.size ? `?${exportParams.toString()}` : ""}`;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -81,9 +86,17 @@ export default async function ClosingBalancePage({
             Live on-hand quantity of every item at every site — computed from the ledger, always ties out.
           </p>
         </div>
-        <span className="text-sm text-gray-500">
-          {rowItems.length} items × {siteCols.length} sites
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-500">
+            {rowItems.length} items × {siteCols.length} sites
+          </span>
+          <a
+            href={exportHref}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+          >
+            Download Excel
+          </a>
+        </div>
       </div>
 
       {/* Filters */}
