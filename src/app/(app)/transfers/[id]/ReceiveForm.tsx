@@ -21,10 +21,10 @@ export function ReceiveForm({
   return (
     <form
       action={formAction}
-      className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm"
+      className="rounded-lg border border-line bg-surface p-5 shadow-sm"
     >
       <h2 className="mb-1 text-base font-semibold">Confirm receipt</h2>
-      <p className="mb-4 text-sm text-gray-500">
+      <p className="mb-4 text-sm text-ink-2">
         Enter the quantity that actually arrived. Differences are flagged as a
         partial receipt.
       </p>
@@ -32,7 +32,7 @@ export function ReceiveForm({
 
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
+          <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
             <th className="py-2">Item</th>
             <th className="py-2 text-right">Sent</th>
             <th className="py-2 text-right">Received</th>
@@ -40,11 +40,11 @@ export function ReceiveForm({
         </thead>
         <tbody>
           {lines.map((l) => (
-            <tr key={l.id} className="border-b border-gray-50">
+            <tr key={l.id} className="border-b border-line">
               <td className="py-2">
                 {l.item?.code} — {l.item?.description}
               </td>
-              <td className="py-2 text-right tabular-nums text-gray-600">
+              <td className="py-2 text-right tabular-nums text-ink-2">
                 {Number(l.qty_sent).toLocaleString("en-IN")} {l.item?.unit}
               </td>
               <td className="py-2 text-right">
@@ -54,7 +54,7 @@ export function ReceiveForm({
                   defaultValue={l.qty_sent}
                   min="0"
                   step="any"
-                  className="w-28 rounded-lg border border-gray-300 px-2 py-1 text-right text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  className="w-28 rounded-lg border border-line-strong px-2 py-1 text-right text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                 />
               </td>
             </tr>
@@ -63,7 +63,7 @@ export function ReceiveForm({
       </table>
 
       {error && (
-        <p className="mt-3 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
+        <p className="mt-3 rounded-lg bg-danger-soft px-4 py-2 text-sm text-danger">
           {error}
         </p>
       )}
@@ -71,7 +71,7 @@ export function ReceiveForm({
       <button
         type="submit"
         disabled={pending}
-        className="mt-4 rounded-lg bg-green-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-green-700 disabled:opacity-60"
+        className="mt-4 rounded-lg bg-good px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:opacity-90 disabled:opacity-60"
       >
         {pending ? "Approving…" : "Approve receipt"}
       </button>

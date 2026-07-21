@@ -5,9 +5,9 @@ import { CreateUserForm, AssignSiteForm, ChangePasswordForm, ChangeEmailForm, Re
 
 function RoleBadge({ role }: { role: string }) {
   const styles: Record<string, string> = {
-    superadmin: "bg-red-100 text-red-700",
-    admin: "bg-purple-100 text-purple-700",
-    supervisor: "bg-blue-100 text-blue-700",
+    superadmin: "bg-danger-soft text-danger",
+    admin: "bg-accent-soft text-accent-strong",
+    supervisor: "bg-accent-soft text-accent-strong",
   };
   const labels: Record<string, string> = {
     superadmin: "Superadmin",
@@ -15,7 +15,7 @@ function RoleBadge({ role }: { role: string }) {
     supervisor: "Store Manager",
   };
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${styles[role] ?? "bg-gray-100 text-gray-600"}`}>
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${styles[role] ?? "bg-surface-2 text-ink-2"}`}>
       {labels[role] ?? role}
     </span>
   );
@@ -65,18 +65,18 @@ export default async function UsersPage() {
     <div className="max-w-4xl space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">User accounts</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-ink-2">
           Create accounts and assign each store manager to their home site.
         </p>
       </div>
 
       {/* Existing users */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-line bg-surface p-5 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">All users</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
+              <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
                 <th className="py-2 pr-4">Name</th>
                 <th className="py-2 pr-4">Username (email)</th>
                 <th className="py-2 pr-4">Role</th>
@@ -91,20 +91,20 @@ export default async function UsersPage() {
                 // Admins & superadmins can manage any non-superadmin account except their own.
                 const canManage = p.id !== user.id && p.role !== "superadmin";
                 return (
-                  <tr key={p.id} className="border-b border-gray-50">
-                    <td className="py-2.5 pr-4 font-medium text-gray-800">
-                      {p.full_name ?? <span className="text-gray-400">—</span>}
+                  <tr key={p.id} className="border-b border-line">
+                    <td className="py-2.5 pr-4 font-medium text-ink">
+                      {p.full_name ?? <span className="text-ink-3">—</span>}
                     </td>
-                    <td className="py-2.5 pr-4 text-gray-600">
-                      {emailById.get(p.id) || <span className="text-gray-400">—</span>}
+                    <td className="py-2.5 pr-4 text-ink-2">
+                      {emailById.get(p.id) || <span className="text-ink-3">—</span>}
                     </td>
                     <td className="py-2.5 pr-4">
                       <RoleBadge role={p.role} />
                     </td>
-                    <td className="py-2.5 pr-4 text-gray-600">
+                    <td className="py-2.5 pr-4 text-ink-2">
                       {p.project
                         ? `${p.project.code} — ${p.project.name}`
-                        : <span className="text-gray-400">Not assigned</span>}
+                        : <span className="text-ink-3">Not assigned</span>}
                     </td>
                     <td className="py-2.5 pr-4">
                       {canEdit && (
@@ -133,9 +133,9 @@ export default async function UsersPage() {
       </section>
 
       {/* Create new account */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-line bg-surface p-5 shadow-sm">
         <h2 className="mb-1 text-base font-semibold">Create new account</h2>
-        <p className="mb-4 text-xs text-gray-500">
+        <p className="mb-4 text-xs text-ink-2">
           The account is active immediately — the user can log in with these credentials right away.
           {isSuperadmin && " As superadmin you can create both admin and store manager accounts."}
         </p>

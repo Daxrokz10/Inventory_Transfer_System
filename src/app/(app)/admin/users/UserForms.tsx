@@ -6,7 +6,7 @@ import { createUser, assignSite, changePassword, changeEmail, deleteUser } from 
 type Project = { id: string; code: string; name: string };
 
 const field =
-  "rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full";
+  "rounded-lg border border-line-strong px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent w-full";
 
 export function CreateUserForm({
   projects,
@@ -29,26 +29,26 @@ export function CreateUserForm({
   return (
     <form id="create-user-form" action={action} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        <label className="flex flex-col gap-1 text-sm text-gray-600">
+        <label className="flex flex-col gap-1 text-sm text-ink-2">
           Full name *
           <input name="full_name" required className={field} placeholder="Ramesh Patel" />
         </label>
-        <label className="flex flex-col gap-1 text-sm text-gray-600">
+        <label className="flex flex-col gap-1 text-sm text-ink-2">
           Email *
           <input name="email" type="email" required className={field} placeholder="ramesh@shreeganeshcorp.com" />
         </label>
-        <label className="flex flex-col gap-1 text-sm text-gray-600">
+        <label className="flex flex-col gap-1 text-sm text-ink-2">
           Password *
           <input name="password" type="password" required minLength={8} className={field} />
         </label>
-        <label className="flex flex-col gap-1 text-sm text-gray-600">
+        <label className="flex flex-col gap-1 text-sm text-ink-2">
           Role *
           <select name="role" defaultValue="supervisor" className={field}>
             <option value="supervisor">Store Manager</option>
             {isSuperadmin && <option value="admin">Admin</option>}
           </select>
         </label>
-        <label className="flex flex-col gap-1 text-sm text-gray-600 sm:col-span-2">
+        <label className="flex flex-col gap-1 text-sm text-ink-2 sm:col-span-2">
           Assign site
           <select name="home_project_id" className={field}>
             <option value="">— None (assign later) —</option>
@@ -61,12 +61,12 @@ export function CreateUserForm({
         </label>
       </div>
       {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p className="rounded-lg bg-danger-soft px-4 py-2 text-sm text-danger">{error}</p>
       )}
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+        className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-accent-strong disabled:opacity-60"
       >
         {pending ? "Creating…" : "Create account"}
       </button>
@@ -91,7 +91,7 @@ export function AssignSiteForm({
       <select
         name="home_project_id"
         defaultValue={currentProjectId ?? ""}
-        className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs focus:outline-none"
+        className="rounded-lg border border-line-strong px-2 py-1.5 text-xs focus:outline-none"
       >
         <option value="">— None —</option>
         {projects.map((p) => (
@@ -103,11 +103,11 @@ export function AssignSiteForm({
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-gray-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+        className="rounded-lg bg-ink-2 px-3 py-1.5 text-xs font-medium text-white hover:bg-ink disabled:opacity-60"
       >
         {pending ? "Saving…" : "Save"}
       </button>
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {error && <span className="text-xs text-danger">{error}</span>}
     </form>
   );
 }
@@ -128,7 +128,7 @@ export function ChangeEmailForm({ userId, currentEmail }: { userId: string; curr
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-xs font-medium text-blue-600 hover:underline"
+        className="text-xs font-medium text-accent hover:underline"
       >
         Change email
       </button>
@@ -144,23 +144,23 @@ export function ChangeEmailForm({ userId, currentEmail }: { userId: string; curr
         required
         defaultValue={currentEmail}
         placeholder="New email"
-        className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs focus:outline-none"
+        className="rounded-lg border border-line-strong px-2 py-1.5 text-xs focus:outline-none"
       />
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-gray-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+        className="rounded-lg bg-ink-2 px-3 py-1.5 text-xs font-medium text-white hover:bg-ink disabled:opacity-60"
       >
         {pending ? "Saving…" : "Save"}
       </button>
       <button
         type="button"
         onClick={() => setOpen(false)}
-        className="text-xs text-gray-400 hover:text-gray-600"
+        className="text-xs text-ink-3 hover:text-ink-2"
       >
         Cancel
       </button>
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {error && <span className="text-xs text-danger">{error}</span>}
     </form>
   );
 }
@@ -181,7 +181,7 @@ export function ChangePasswordForm({ userId }: { userId: string }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-xs font-medium text-blue-600 hover:underline"
+        className="text-xs font-medium text-accent hover:underline"
       >
         Change password
       </button>
@@ -197,23 +197,23 @@ export function ChangePasswordForm({ userId }: { userId: string }) {
         required
         minLength={8}
         placeholder="New password"
-        className="rounded-lg border border-gray-300 px-2 py-1.5 text-xs focus:outline-none"
+        className="rounded-lg border border-line-strong px-2 py-1.5 text-xs focus:outline-none"
       />
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-gray-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800 disabled:opacity-60"
+        className="rounded-lg bg-ink-2 px-3 py-1.5 text-xs font-medium text-white hover:bg-ink disabled:opacity-60"
       >
         {pending ? "Saving…" : "Save"}
       </button>
       <button
         type="button"
         onClick={() => setOpen(false)}
-        className="text-xs text-gray-400 hover:text-gray-600"
+        className="text-xs text-ink-3 hover:text-ink-2"
       >
         Cancel
       </button>
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {error && <span className="text-xs text-danger">{error}</span>}
     </form>
   );
 }
@@ -235,11 +235,11 @@ export function RemoveUserForm({ userId }: { userId: string }) {
       <button
         type="submit"
         disabled={pending}
-        className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
+        className="text-xs font-medium text-danger hover:underline disabled:opacity-60"
       >
         {pending ? "Removing…" : "Remove"}
       </button>
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {error && <span className="text-xs text-danger">{error}</span>}
     </form>
   );
 }

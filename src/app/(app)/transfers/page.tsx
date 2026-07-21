@@ -2,11 +2,11 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
 const statusStyles: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  dispatched: "bg-amber-100 text-amber-800",
-  received: "bg-green-100 text-green-800",
+  draft: "bg-surface-2 text-ink-2",
+  dispatched: "bg-warn-soft text-warn",
+  received: "bg-good-soft text-good",
   partial: "bg-orange-100 text-orange-800",
-  cancelled: "bg-red-100 text-red-700",
+  cancelled: "bg-danger-soft text-danger",
 };
 
 const statusLabel: Record<string, string> = {
@@ -33,21 +33,21 @@ export default async function TransfersPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Transfers</h1>
         <Link
           href="/transfers/new"
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-strong"
         >
           New transfer
         </Link>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">
         {!transfers || transfers.length === 0 ? (
-          <p className="p-6 text-sm text-gray-500">
+          <p className="p-6 text-sm text-ink-2">
             No transfers yet. Create one to dispatch material from your site.
           </p>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
+              <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
                 <th className="px-5 py-3">Challan</th>
                 <th className="px-4 py-3">Date</th>
                 <th className="px-4 py-3">From</th>
@@ -60,16 +60,16 @@ export default async function TransfersPage() {
                 const from = t.from_project as unknown as { code: string; name: string } | null;
                 const to = t.to_project as unknown as { code: string; name: string } | null;
                 return (
-                  <tr key={t.id} className="border-b border-gray-50 hover:bg-gray-50">
+                  <tr key={t.id} className="border-b border-line hover:bg-surface-2">
                     <td className="px-5 py-3 font-medium">
                       <Link
                         href={`/transfers/${t.id}`}
-                        className="text-blue-600 hover:underline"
+                        className="text-accent hover:underline"
                       >
                         {t.challan_no ?? "—"}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 tabular-nums text-gray-600">
+                    <td className="px-4 py-3 tabular-nums text-ink-2">
                       {t.transfer_date
                         ? new Date(t.transfer_date).toLocaleDateString("en-IN", {
                             day: "2-digit",
@@ -82,7 +82,7 @@ export default async function TransfersPage() {
                       {from ? (
                         <span>
                           <span className="font-medium">{from.code}</span>
-                          <span className="ml-1.5 text-gray-500 truncate max-w-[10rem] inline-block align-bottom">
+                          <span className="ml-1.5 text-ink-2 truncate max-w-[10rem] inline-block align-bottom">
                             {from.name}
                           </span>
                         </span>
@@ -92,7 +92,7 @@ export default async function TransfersPage() {
                       {to ? (
                         <span>
                           <span className="font-medium">{to.code}</span>
-                          <span className="ml-1.5 text-gray-500 truncate max-w-[10rem] inline-block align-bottom">
+                          <span className="ml-1.5 text-ink-2 truncate max-w-[10rem] inline-block align-bottom">
                             {to.name}
                           </span>
                         </span>
@@ -101,7 +101,7 @@ export default async function TransfersPage() {
                     <td className="px-4 py-3">
                       <span
                         className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          statusStyles[t.status] ?? "bg-gray-100"
+                          statusStyles[t.status] ?? "bg-surface-2"
                         }`}
                       >
                         {statusLabel[t.status] ?? t.status}

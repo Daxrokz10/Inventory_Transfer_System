@@ -3,6 +3,8 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getPricesForCity } from "@/lib/diesel/fuelPrice";
+import { cityForState } from "@/lib/diesel/types";
 
 async function requireAdmin() {
   const supabase = await createClient();
@@ -37,6 +39,7 @@ export async function createSite(
     code,
     name,
     address: str("address") || null,
+    state: str("state") || null,
     gstin: str("gstin") || null,
     branch: str("branch") || null,
     transporter_name: str("transporter_name") || null,
@@ -46,7 +49,29 @@ export async function createSite(
     return error.message;
   }
 
-  revalidatePath("/masters/sites");
+  revalidatePath("/diesel/sites");
   revalidatePath("/masters/projects");
   return null;
+}
+
+// Set/change the state of an existing site — this drives the daily fuel
+// price lookup (each state maps to one reference city, queried on
+// goodreturns.in). Fetches today's price right away so the Sites page
+// reflects it immediately, rather than waiting for a daily report.
+export async function updateSiteState(formData: FormData): Promise<void> {
+  const supabase = await requireAdmin();
+  const id = String(formData.get("project_id") ?? "");
+  const state = String(formData.get("state") ?? "").trim() || null;
+  if (!id) return;
+
+  await supabase.from("projects").update({ state }).eq("id", id);
+
+  const city = cityForState(state);
+  if (city) {
+    const today = new Date().toISOString().slice(0, 10);
+    await getPricesForCity(city, today);
+  }
+
+  revalidatePath("/diesel/sites");
+  revalidatePath("/diesel");
 }

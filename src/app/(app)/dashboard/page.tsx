@@ -22,13 +22,13 @@ function StatCard({
   accent: string;
 }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-line bg-surface p-5 shadow-sm">
       <div className={`h-1 w-8 rounded-full ${accent}`} />
-      <p className="mt-3 text-sm text-gray-500">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">
+      <p className="mt-3 text-sm text-ink-2">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight text-ink">
         {value}
       </p>
-      {sub && <p className="mt-1 text-xs text-gray-400">{sub}</p>}
+      {sub && <p className="mt-1 text-xs text-ink-3">{sub}</p>}
     </div>
   );
 }
@@ -150,18 +150,18 @@ export default async function DashboardPage() {
       <div className="flex items-end justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-          <p className="mt-1 text-sm text-gray-500">{subtitle}</p>
+          <p className="mt-1 text-sm text-ink-2">{subtitle}</p>
         </div>
         <Link
           href="/transfers/new"
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-strong"
         >
           + New transfer
         </Link>
       </div>
 
       {noSite ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-800">
+        <div className="rounded-lg border border-warn/30 bg-warn-soft p-6 text-sm text-warn">
           Your account has not been assigned to a site yet. Ask your admin to assign you to a site from the Users page.
         </div>
       ) : (
@@ -171,13 +171,13 @@ export default async function DashboardPage() {
               label="Stock value"
               value={inr(totalValue)}
               sub="on-hand × rate"
-              accent="bg-blue-500"
+              accent="bg-accent"
             />
             <StatCard
               label="Units on hand"
               value={qty(totalUnits)}
               sub={`${balances.filter((b) => Number(b.on_hand) > 0).length} item balances`}
-              accent="bg-green-500"
+              accent="bg-good-soft0"
             />
             {isAdmin ? (
               <StatCard
@@ -202,29 +202,29 @@ export default async function DashboardPage() {
                   ? `${inTransit.count ?? 0} transfers in transit`
                   : "transfers involving your site"
               }
-              accent="bg-amber-500"
+              accent="bg-warn-soft0"
             />
           </div>
 
           <div className="grid gap-6 lg:grid-cols-3">
-            <section className="lg:col-span-2 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <section className="lg:col-span-2 rounded-lg border border-line bg-surface p-5 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-base font-semibold">
                   {isAdmin ? "Stock by project" : "Stock at your site"}
                 </h2>
                 {isAdmin && (
-                  <span className="text-xs text-gray-400">
+                  <span className="text-xs text-ink-3">
                     {projectRows.length} sites
                   </span>
                 )}
               </div>
               {projectRows.length === 0 ? (
-                <p className="text-sm text-gray-500">No stock recorded yet.</p>
+                <p className="text-sm text-ink-2">No stock recorded yet.</p>
               ) : (
                 <div className="max-h-[28rem] overflow-y-auto">
                   <table className="w-full text-sm">
-                    <thead className="sticky top-0 bg-white">
-                      <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
+                    <thead className="sticky top-0 bg-surface">
+                      <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
                         <th className="py-2">{isAdmin ? "Project" : "Category"}</th>
                         <th className="py-2 text-right">Units</th>
                         <th className="py-2 text-right">Value</th>
@@ -233,9 +233,9 @@ export default async function DashboardPage() {
                     <tbody>
                       {isAdmin
                         ? projectRows.map((r) => (
-                            <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
+                            <tr key={r.id} className="border-b border-line hover:bg-surface-2">
                               <td className="py-2 pr-2">{r.label}</td>
-                              <td className="py-2 text-right tabular-nums text-gray-600">
+                              <td className="py-2 text-right tabular-nums text-ink-2">
                                 {qty(r.qty)}
                               </td>
                               <td className="py-2 text-right font-medium tabular-nums">
@@ -244,9 +244,9 @@ export default async function DashboardPage() {
                             </tr>
                           ))
                         : groupRows.map((g) => (
-                            <tr key={g.group} className="border-b border-gray-50 hover:bg-gray-50">
+                            <tr key={g.group} className="border-b border-line hover:bg-surface-2">
                               <td className="py-2 pr-2">{g.group}</td>
-                              <td className="py-2 text-right tabular-nums text-gray-600">
+                              <td className="py-2 text-right tabular-nums text-ink-2">
                                 {qty(g.qty)}
                               </td>
                               <td className="py-2 text-right font-medium tabular-nums">
@@ -260,29 +260,29 @@ export default async function DashboardPage() {
               )}
             </section>
 
-            <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+            <section className="rounded-lg border border-line bg-surface p-5 shadow-sm">
               <h2 className="mb-4 text-base font-semibold">By category</h2>
               {groupRows.length === 0 ? (
-                <p className="text-sm text-gray-500">No stock recorded yet.</p>
+                <p className="text-sm text-ink-2">No stock recorded yet.</p>
               ) : (
                 <ul className="space-y-3">
                   {groupRows.map((g) => (
                     <li key={g.group}>
                       <div className="flex items-baseline justify-between text-sm">
-                        <span className="truncate pr-2 font-medium text-gray-700">
+                        <span className="truncate pr-2 font-medium text-ink-2">
                           {g.group}
                         </span>
-                        <span className="tabular-nums text-gray-500">
+                        <span className="tabular-nums text-ink-2">
                           {inr(g.value)}
                         </span>
                       </div>
-                      <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                      <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-surface-2">
                         <div
-                          className="h-full rounded-full bg-blue-500"
+                          className="h-full rounded-full bg-accent"
                           style={{ width: `${(g.value / groupMax) * 100}%` }}
                         />
                       </div>
-                      <p className="mt-0.5 text-xs text-gray-400">
+                      <p className="mt-0.5 text-xs text-ink-3">
                         {qty(g.qty)} units
                       </p>
                     </li>

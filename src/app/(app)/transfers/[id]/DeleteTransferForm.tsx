@@ -27,11 +27,11 @@ export function DeleteTransferForm({
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+        className="rounded-lg border border-danger px-3 py-1.5 text-sm font-medium text-danger hover:bg-danger-soft disabled:opacity-60"
       >
         {pending ? "Deleting…" : "Delete transfer"}
       </button>
-      {error && <span className="text-xs text-red-600">{error}</span>}
+      {error && <span className="text-xs text-danger">{error}</span>}
     </form>
   );
 }

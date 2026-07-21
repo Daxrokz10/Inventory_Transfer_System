@@ -75,8 +75,8 @@ export function NewTransferForm({
   );
 
   const field =
-    "rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
-  const label = "flex flex-col gap-1 text-sm text-gray-600";
+    "rounded-lg border border-line-strong px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
+  const label = "flex flex-col gap-1 text-sm text-ink-2";
 
   return (
     <form
@@ -94,7 +94,7 @@ export function NewTransferForm({
       <input type="hidden" name="lines" value={linesJson} />
 
       {/* Header */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-line bg-surface p-5 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">Transfer details</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className={label}>
@@ -143,7 +143,7 @@ export function NewTransferForm({
             <input name="vehicle_no" className={field} placeholder="GJ 33 T 5158" />
           </label>
           <label className={label}>
-            LR no. <span className="text-gray-400">(optional)</span>
+            LR no. <span className="text-ink-3">(optional)</span>
             <input name="lr_no" className={field} />
           </label>
           <label className={label}>
@@ -155,31 +155,31 @@ export function NewTransferForm({
             <input type="date" name="eway_bill_date" className={field} />
           </label>
           <label className={label}>
-            Transporter <span className="text-gray-400">(optional)</span>
+            Transporter <span className="text-ink-3">(optional)</span>
             <input name="transporter_name" className={field} />
           </label>
           <label className={`${label} sm:col-span-2 lg:col-span-3`}>
-            Remarks <span className="text-gray-400">(optional)</span>
+            Remarks <span className="text-ink-3">(optional)</span>
             <input name="remarks" className={field} />
           </label>
         </div>
       </section>
 
       {/* Line items */}
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-line bg-surface p-5 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold">Items</h2>
           <button
             type="button"
             onClick={() => setLines((ls) => [...ls, blankLine()])}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+            className="rounded-lg border border-line-strong px-3 py-1.5 text-sm font-medium hover:bg-surface-2"
           >
             + Add item
           </button>
         </div>
 
         <div className="space-y-3">
-          <div className="hidden grid-cols-[1fr_7rem_7rem_8rem_2rem] gap-2 px-1 text-xs uppercase tracking-wide text-gray-400 sm:grid">
+          <div className="hidden grid-cols-[1fr_7rem_7rem_8rem_2rem] gap-2 px-1 text-xs uppercase tracking-wide text-ink-3 sm:grid">
             <span>Item</span>
             <span className="text-right">Qty</span>
             <span className="text-right">Rate</span>
@@ -226,7 +226,7 @@ export function NewTransferForm({
                     placeholder="Rate"
                     className={`${field} min-w-0 text-right`}
                   />
-                  <span className="px-1 text-right text-sm tabular-nums text-gray-600">
+                  <span className="px-1 text-right text-sm tabular-nums text-ink-2">
                     {amount.toLocaleString("en-IN")}
                   </span>
                   <button
@@ -236,7 +236,7 @@ export function NewTransferForm({
                         ls.length > 1 ? ls.filter((x) => x.key !== l.key) : ls,
                       )
                     }
-                    className="text-gray-400 hover:text-red-600"
+                    className="text-ink-3 hover:text-danger"
                     aria-label="Remove line"
                   >
                     ✕
@@ -247,13 +247,13 @@ export function NewTransferForm({
                 {l.item_id && (
                   <div className="pl-1 text-xs sm:col-span-5">
                     {stockLoading ? (
-                      <span className="text-gray-400">Loading stock…</span>
+                      <span className="text-ink-3">Loading stock…</span>
                     ) : onHand === null ? (
-                      <span className="text-gray-400">
+                      <span className="text-ink-3">
                         {fromProjectId ? "No stock record" : "Select a from-site first"}
                       </span>
                     ) : (
-                      <span className={onHand < 0 || overDispatch ? "font-medium text-blue-600" : "text-green-700"}>
+                      <span className={onHand < 0 || overDispatch ? "font-medium text-accent" : "text-good"}>
                         Available:{" "}
                         {onHand.toLocaleString("en-IN")} {item?.unit ?? "NOS"}
                         {overDispatch && " — balance will go negative after this dispatch"}
@@ -266,8 +266,8 @@ export function NewTransferForm({
           })}
         </div>
 
-        <div className="mt-4 flex justify-end border-t border-gray-100 pt-3 text-sm">
-          <span className="text-gray-500">Total&nbsp;</span>
+        <div className="mt-4 flex justify-end border-t border-line pt-3 text-sm">
+          <span className="text-ink-2">Total&nbsp;</span>
           <span className="font-semibold tabular-nums">
             {total.toLocaleString("en-IN")}
           </span>
@@ -275,7 +275,7 @@ export function NewTransferForm({
       </section>
 
       {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">
+        <p className="rounded-lg bg-danger-soft px-4 py-2 text-sm text-danger">
           {error}
         </p>
       )}
@@ -284,11 +284,11 @@ export function NewTransferForm({
         <button
           type="submit"
           disabled={pending}
-          className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+          className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-accent-strong disabled:opacity-60"
         >
           {pending ? "Dispatching…" : "Save & dispatch"}
         </button>
-        <span className="text-xs text-gray-400">
+        <span className="text-xs text-ink-3">
           Dispatching removes the quantity from the source site as in-transit.
         </span>
       </div>

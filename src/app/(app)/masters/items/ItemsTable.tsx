@@ -21,7 +21,7 @@ const qtyFmt = (n: number) =>
 const cell = "px-3 py-2 align-top";
 const headCell = "px-3 py-2 whitespace-nowrap";
 const input =
-  "w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
+  "w-full rounded border border-line-strong px-2 py-1 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent";
 
 export function ItemsTable({
   items,
@@ -34,7 +34,7 @@ export function ItemsTable({
   return (
     <table className="w-full text-sm">
       <thead>
-        <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
+        <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
           <th className={headCell}>Code</th>
           <th className={headCell}>Description</th>
           <th className={headCell}>Unit</th>
@@ -78,7 +78,7 @@ function ItemRow({
 
   if (!editing) {
     return (
-      <tr className="border-b border-gray-50 hover:bg-gray-50">
+      <tr className="border-b border-line hover:bg-surface-2">
         <td className={`${cell} font-medium`}>{item.code}</td>
         <td className={cell}>{item.description}</td>
         <td className={cell}>{item.unit}</td>
@@ -90,7 +90,7 @@ function ItemRow({
         </td>
         <td
           className={`${cell} text-right font-medium tabular-nums ${
-            item.total < 0 ? "text-red-600" : "text-gray-800"
+            item.total < 0 ? "text-danger" : "text-ink"
           }`}
         >
           {qtyFmt(item.total)}
@@ -101,7 +101,7 @@ function ItemRow({
               <button
                 type="button"
                 onClick={() => setEditing(true)}
-                className="text-xs font-medium text-blue-600 hover:underline"
+                className="text-xs font-medium text-accent hover:underline"
               >
                 Edit
               </button>
@@ -116,14 +116,14 @@ function ItemRow({
                 <button
                   type="submit"
                   disabled={deleting}
-                  className="text-xs font-medium text-red-600 hover:underline disabled:opacity-60"
+                  className="text-xs font-medium text-danger hover:underline disabled:opacity-60"
                 >
                   {deleting ? "…" : "Delete"}
                 </button>
               </form>
             </div>
             {deleteErr && (
-              <p className="mt-1 text-xs text-red-600">{deleteErr}</p>
+              <p className="mt-1 text-xs text-danger">{deleteErr}</p>
             )}
           </td>
         )}
@@ -134,36 +134,36 @@ function ItemRow({
   // Editing: one form spanning the row (placed inside a single cell so the
   // markup stays valid, laid out as a grid).
   return (
-    <tr className="border-b border-gray-100 bg-blue-50/40">
+    <tr className="border-b border-line bg-accent-soft/40">
       <td className={cell} colSpan={colCount}>
         <form action={updateAction} className="space-y-3">
           <input type="hidden" name="id" value={item.id} />
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
+            <label className="flex flex-col gap-1 text-xs text-ink-2">
               Code
               <input name="code" defaultValue={item.code} required className={input} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500 lg:col-span-3">
+            <label className="flex flex-col gap-1 text-xs text-ink-2 lg:col-span-3">
               Description
               <input name="description" defaultValue={item.description} required className={input} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
+            <label className="flex flex-col gap-1 text-xs text-ink-2">
               Unit
               <input name="unit" defaultValue={item.unit ?? "NOS"} className={input} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
+            <label className="flex flex-col gap-1 text-xs text-ink-2">
               Sub group
               <input name="sub_group" defaultValue={item.sub_group ?? ""} className={input} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
+            <label className="flex flex-col gap-1 text-xs text-ink-2">
               Main group
               <input name="main_group" defaultValue={item.main_group ?? ""} className={input} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
+            <label className="flex flex-col gap-1 text-xs text-ink-2">
               HSN code
               <input name="hsn_code" defaultValue={item.hsn_code ?? ""} className={input} />
             </label>
-            <label className="flex flex-col gap-1 text-xs text-gray-500">
+            <label className="flex flex-col gap-1 text-xs text-ink-2">
               Rate
               <input
                 name="per_day_rate"
@@ -176,20 +176,20 @@ function ItemRow({
             </label>
           </div>
           {updateErr && (
-            <p className="rounded bg-red-50 px-3 py-1.5 text-xs text-red-700">{updateErr}</p>
+            <p className="rounded bg-danger-soft px-3 py-1.5 text-xs text-danger">{updateErr}</p>
           )}
           <div className="flex items-center gap-2">
             <button
               type="submit"
               disabled={updating}
-              className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+              className="rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-strong disabled:opacity-60"
             >
               {updating ? "Saving…" : "Save"}
             </button>
             <button
               type="button"
               onClick={() => setEditing(false)}
-              className="rounded-lg border border-gray-300 px-4 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+              className="rounded-lg border border-line-strong px-4 py-1.5 text-sm font-medium text-ink-2 hover:bg-surface-2"
             >
               Cancel
             </button>

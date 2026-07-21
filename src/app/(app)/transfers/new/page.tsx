@@ -30,7 +30,7 @@ export default async function NewTransferPage() {
     <div className="max-w-4xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">New transfer</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-ink-2">
           Dispatch material from one site to another.
         </p>
       </div>

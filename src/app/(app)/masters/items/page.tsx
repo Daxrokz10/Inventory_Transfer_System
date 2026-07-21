@@ -39,14 +39,14 @@ export default async function ItemsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Items</h1>
-        <span className="text-sm text-gray-500">{items?.length ?? 0} shown</span>
+        <span className="text-sm text-ink-2">{items?.length ?? 0} shown</span>
       </div>
 
       {isAdmin && <NewItemButton />}
 
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="overflow-x-auto rounded-lg border border-line bg-surface p-5 shadow-sm">
         {rows.length === 0 ? (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-ink-2">
             No items yet — add one with “New item”, or run the importer to load the
             item master from your spreadsheets.
           </p>

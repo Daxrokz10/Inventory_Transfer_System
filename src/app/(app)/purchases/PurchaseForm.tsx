@@ -7,8 +7,8 @@ type Project = { id: string; code: string; name: string };
 type Item = { id: string; code: string; description: string; unit: string; sub_group: string | null; per_day_rate: number };
 
 const field =
-  "rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full";
-const label = "flex flex-col gap-1 text-sm text-gray-600";
+  "rounded-lg border border-line-strong px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent w-full";
+const label = "flex flex-col gap-1 text-sm text-ink-2";
 
 export function PurchaseForm({
   items,
@@ -100,7 +100,7 @@ export function PurchaseForm({
           />
         </label>
         <label className={label}>
-          Rate <span className="text-gray-400">(optional)</span>
+          Rate <span className="text-ink-3">(optional)</span>
           <input
             name="rate"
             type="number"
@@ -114,20 +114,20 @@ export function PurchaseForm({
         </label>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-gray-500">
+      <div className="flex items-center justify-between text-sm text-ink-2">
         <span>
           Amount:{" "}
-          <span className="font-semibold tabular-nums text-gray-800">
+          <span className="font-semibold tabular-nums text-ink">
             {amount.toLocaleString("en-IN")}
           </span>
         </span>
       </div>
 
       {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p className="rounded-lg bg-danger-soft px-4 py-2 text-sm text-danger">{error}</p>
       )}
       {done && !error && (
-        <p className="rounded-lg bg-green-50 px-4 py-2 text-sm text-green-700">
+        <p className="rounded-lg bg-good-soft px-4 py-2 text-sm text-good">
           Purchase recorded — stock added to the site.
         </p>
       )}
@@ -135,7 +135,7 @@ export function PurchaseForm({
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+        className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-accent-strong disabled:opacity-60"
       >
         {pending ? "Saving…" : "Record purchase"}
       </button>

@@ -5,10 +5,66 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* =============================================================
+   SGC Suite design tokens — modern industrial
+   Two modules share one shell; the accent swaps per module via
+   [data-theme="diesel"] so utilities like bg-accent re-color
+   automatically. Everything else (surfaces, ink, lines) is shared.
+   ============================================================= */
+@theme {
+  /* Surfaces */
+  --color-page: #f3f3f1; /* concrete */
+  --color-surface: #ffffff;
+  --color-surface-2: #f8f8f7;
+
+  /* Ink */
+  --color-ink: #16181d;
+  --color-ink-2: #565b64;
+  --color-ink-3: #8a8f99;
+
+  /* Hairlines */
+  --color-line: #e3e3df;
+  --color-line-strong: #cfcfc9;
+
+  /* Module accent — Inventory default (steel blue) */
+  --color-accent: #1c5cab;
+  --color-accent-strong: #164a8a;
+  --color-accent-soft: #e3edf9;
+
+  /* Sidebar (graphite, shared by both modules) */
+  --color-sidebar: #14171c;
+  --color-sidebar-hover: #1f242c;
+  --color-sidebar-ink: #e6e8ec;
+  --color-sidebar-muted: #9aa0ab;
+
+  /* Status (text-safe on white) */
+  --color-good: #15803d;
+  --color-good-soft: #e8f5ec;
+  --color-warn: #b45309;
+  --color-warn-soft: #fdf3e3;
+  --color-danger: #b91c1c;
+  --color-danger-soft: #fdecec;
+
+  /* Chart series (validated categorical palette, fixed order) */
+  --color-chart-1: #2a78d6;
+  --color-chart-2: #1baf7a;
+  --color-chart-3: #eda100;
+  --color-chart-4: #008300;
+  --color-chart-5: #4a3aa7;
+  --color-chart-6: #e34948;
+}
+
+/* Diesel module accent — safety amber. Applied by the AppShell wrapper. */
+[data-theme="diesel"] {
+  --color-accent: #b45309;
+  --color-accent-strong: #92400e;
+  --color-accent-soft: #fbf0e0;
+}
+
 /* Internal tool — keep a consistent light theme regardless of OS preference. */
 body {
-  background: #f9fafb; /* gray-50 */
-  color: #111827; /* gray-900 */
+  background: var(--color-page);
+  color: var(--color-ink);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
@@ -20,4 +76,33 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/* Site visualization canvas (diesel module) — drag/pan states that don't
+   map to a single static Tailwind utility. */
+.viz-node.is-moving {
+  opacity: 0.85;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.viz-machine.dragging {
+  opacity: 0.4;
+}
+.viz-dropzone.drag-over {
+  background: var(--color-accent-soft);
+  outline: 2px dashed var(--color-accent);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.viz-machine-drag-preview {
+  position: fixed;
+  z-index: 999;
+  pointer-events: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-ink);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
 }

@@ -51,13 +51,13 @@ export default async function PurchasesPage() {
     <div className="max-w-4xl space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Purchase</h1>
-        <p className="mt-1 text-sm text-gray-500">
+        <p className="mt-1 text-sm text-ink-2">
           Record newly purchased material into a site. Purchases are booked from the{" "}
           <span className="font-medium">{PURCHASE_CODE}</span> purchase source and land in stock immediately.
         </p>
       </div>
 
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-line bg-surface p-5 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">New purchase</h2>
         <PurchaseForm
           items={(items ?? []).map((i) => ({
@@ -71,15 +71,15 @@ export default async function PurchasesPage() {
         />
       </section>
 
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-line bg-surface p-5 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">Recent purchases</h2>
         {recent.length === 0 ? (
-          <p className="text-sm text-gray-500">No purchases recorded yet.</p>
+          <p className="text-sm text-ink-2">No purchases recorded yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
+                <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
                   <th className="py-2 pr-4">Date</th>
                   <th className="py-2 pr-4">Site</th>
                   <th className="py-2 pr-4">Item</th>
@@ -95,14 +95,14 @@ export default async function PurchasesPage() {
                   return (t.transfer_lines ?? []).map((l, i) => {
                     const it = itemMap.get(l.item_id);
                     return (
-                      <tr key={`${t.id}-${i}`} className="border-b border-gray-50">
-                        <td className="py-2.5 pr-4 tabular-nums text-gray-600">{dateStr}</td>
+                      <tr key={`${t.id}-${i}`} className="border-b border-line">
+                        <td className="py-2.5 pr-4 tabular-nums text-ink-2">{dateStr}</td>
                         <td className="py-2.5 pr-4 font-medium">{site?.code ?? "—"}</td>
                         <td className="py-2.5 pr-4">
                           <span className="font-medium">{it?.code}</span>
-                          <span className="ml-1.5 text-gray-500">{it?.description}</span>
+                          <span className="ml-1.5 text-ink-2">{it?.description}</span>
                         </td>
-                        <td className="py-2.5 text-right tabular-nums text-green-700">
+                        <td className="py-2.5 text-right tabular-nums text-good">
                           +{Number(l.qty_sent).toLocaleString("en-IN")}
                         </td>
                       </tr>

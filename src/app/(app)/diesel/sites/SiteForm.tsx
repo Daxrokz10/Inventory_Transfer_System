@@ -2,10 +2,11 @@
 
 import { useActionState } from "react";
 import { createSite } from "./actions";
+import { INDIAN_STATES } from "@/lib/diesel/types";
 
 const field =
-  "rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full";
-const label = "flex flex-col gap-1 text-sm text-gray-600";
+  "rounded-lg border border-line-strong px-3 py-2 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent w-full";
+const label = "flex flex-col gap-1 text-sm text-ink-2";
 
 export function SiteForm() {
   const [error, action, pending] = useActionState(
@@ -31,29 +32,40 @@ export function SiteForm() {
           <input name="name" required className={field} placeholder="RAJKOT DAIRY Project" />
         </label>
         <label className={`${label} sm:col-span-2 lg:col-span-3`}>
-          Address <span className="text-gray-400">(optional)</span>
+          Address <span className="text-ink-3">(optional)</span>
           <input name="address" className={field} />
         </label>
         <label className={label}>
-          GSTIN <span className="text-gray-400">(optional)</span>
+          State <span className="text-ink-3">(for daily fuel prices)</span>
+          <select name="state" className={field} defaultValue="">
+            <option value="">Not set</option>
+            {INDIAN_STATES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={label}>
+          GSTIN <span className="text-ink-3">(optional)</span>
           <input name="gstin" className={field} />
         </label>
         <label className={label}>
-          Branch <span className="text-gray-400">(optional)</span>
+          Branch <span className="text-ink-3">(optional)</span>
           <input name="branch" className={field} placeholder="NAVSARI" />
         </label>
         <label className={label}>
-          Transporter <span className="text-gray-400">(optional)</span>
+          Transporter <span className="text-ink-3">(optional)</span>
           <input name="transporter_name" className={field} />
         </label>
       </div>
       {error && (
-        <p className="rounded-lg bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+        <p className="rounded-lg bg-danger-soft px-4 py-2 text-sm text-danger">{error}</p>
       )}
       <button
         type="submit"
         disabled={pending}
-        className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-60"
+        className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-accent-strong disabled:opacity-60"
       >
         {pending ? "Saving…" : "Add site"}
       </button>

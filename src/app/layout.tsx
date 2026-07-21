@@ -13,8 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Inventory Transfer System — Shree Ganesh Corporation",
-  description: "Track material transfers, approvals and stock across project sites.",
+  title: "SGC Suite — Shree Ganesh Corporation",
+  description:
+    "Inventory transfers, diesel reporting and site machinery across project sites.",
 };
 
 export default function RootLayout({

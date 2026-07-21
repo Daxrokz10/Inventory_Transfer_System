@@ -5,18 +5,18 @@ import { ReceiveForm } from "./ReceiveForm";
 import { DeleteTransferForm } from "./DeleteTransferForm";
 
 const statusStyles: Record<string, string> = {
-  draft: "bg-gray-100 text-gray-700",
-  dispatched: "bg-amber-100 text-amber-800",
-  received: "bg-green-100 text-green-800",
+  draft: "bg-surface-2 text-ink-2",
+  dispatched: "bg-warn-soft text-warn",
+  received: "bg-good-soft text-good",
   partial: "bg-orange-100 text-orange-800",
-  cancelled: "bg-red-100 text-red-700",
+  cancelled: "bg-danger-soft text-danger",
 };
 
 function Field({ label, value }: { label: string; value?: string | null }) {
   return (
     <div>
-      <p className="text-xs uppercase tracking-wide text-gray-400">{label}</p>
-      <p className="text-sm text-gray-800">{value || "—"}</p>
+      <p className="text-xs uppercase tracking-wide text-ink-3">{label}</p>
+      <p className="text-sm text-ink">{value || "—"}</p>
     </div>
   );
 }
@@ -76,7 +76,7 @@ export default async function TransferDetailPage({
         <div>
           <Link
             href="/transfers"
-            className="text-sm text-blue-600 hover:underline"
+            className="text-sm text-accent hover:underline"
           >
             ← All transfers
           </Link>
@@ -87,13 +87,13 @@ export default async function TransferDetailPage({
         <div className="flex items-center gap-3">
           <Link
             href={`/transfers/${id}/challan`}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-lg border border-line-strong px-3 py-1.5 text-sm font-medium text-ink-2 hover:bg-surface-2"
           >
             View challan
           </Link>
           <span
             className={`rounded-full px-3 py-1 text-xs font-medium ${
-              statusStyles[t.status] ?? "bg-gray-100"
+              statusStyles[t.status] ?? "bg-surface-2"
             }`}
           >
             {t.status}
@@ -107,7 +107,7 @@ export default async function TransferDetailPage({
         </div>
       </div>
 
-      <section className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <section className="rounded-lg border border-line bg-surface p-5 shadow-sm">
         <div className="grid gap-4 sm:grid-cols-3">
           <Field label="From" value={from ? `${from.code} — ${from.name}` : null} />
           <Field label="To" value={to ? `${to.code} — ${to.name}` : null} />
@@ -120,11 +120,11 @@ export default async function TransferDetailPage({
         </div>
       </section>
 
-      <section className="overflow-x-auto rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <section className="overflow-x-auto rounded-lg border border-line bg-surface p-5 shadow-sm">
         <h2 className="mb-4 text-base font-semibold">Items</h2>
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-400">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
               <th className="py-2">Item</th>
               <th className="py-2 text-right">Sent</th>
               <th className="py-2 text-right">Received</th>
@@ -138,7 +138,7 @@ export default async function TransferDetailPage({
                 r.qty_received != null &&
                 Number(r.qty_received) !== Number(r.qty_sent);
               return (
-                <tr key={r.id} className="border-b border-gray-50">
+                <tr key={r.id} className="border-b border-line">
                   <td className="py-2">
                     {r.item?.code} — {r.item?.description}
                     {r.item?.sub_group ? ` · ${r.item.sub_group}` : ""}
@@ -148,14 +148,14 @@ export default async function TransferDetailPage({
                   </td>
                   <td
                     className={`py-2 text-right tabular-nums ${
-                      short ? "font-medium text-orange-600" : "text-gray-600"
+                      short ? "font-medium text-orange-600" : "text-ink-2"
                     }`}
                   >
                     {r.qty_received == null
                       ? "—"
                       : Number(r.qty_received).toLocaleString("en-IN")}
                   </td>
-                  <td className="py-2 text-right tabular-nums text-gray-600">
+                  <td className="py-2 text-right tabular-nums text-ink-2">
                     {Number(r.rate ?? 0).toLocaleString("en-IN")}
                   </td>
                   <td className="py-2 text-right tabular-nums">
@@ -169,7 +169,7 @@ export default async function TransferDetailPage({
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={4} className="py-2 text-right text-gray-500">
+              <td colSpan={4} className="py-2 text-right text-ink-2">
                 Total
               </td>
               <td className="py-2 text-right font-semibold tabular-nums">
@@ -192,7 +192,7 @@ export default async function TransferDetailPage({
       )}
 
       {awaitingOther && (
-        <p className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p className="rounded-lg bg-warn-soft px-4 py-3 text-sm text-warn">
           In transit — only the receiving site
           {to ? ` (${to.code})` : ""} or an administrator can confirm receipt.
         </p>
