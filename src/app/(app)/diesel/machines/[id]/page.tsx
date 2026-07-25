@@ -116,12 +116,12 @@ export default async function MachineDetailPage({
     .filter((l) => l.log_date >= new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10))
     .reduce((s, l) => s + Number(l.fuel_issued_liters), 0);
 
-  // Fuel-source mix — only meaningful at Shraddha-pump sites, where fills
-  // are tagged. Share of tagged fills that came from Shraddha's pump.
+  // Fuel-source mix — how often this machine filled offsite (not from this
+  // site's own stock) vs. its normal source (on-site stock, or Shraddha's
+  // pump at those two sites).
   const fuelDays = logs.filter((l) => Number(l.fuel_issued_liters) > 0);
-  const taggedDays = fuelDays.filter((l) => l.fuel_source != null);
-  const shraddhaDays = taggedDays.filter((l) => l.fuel_source === "shraddha").length;
-  const shraddhaShare = taggedDays.length > 0 ? Math.round((shraddhaDays / taggedDays.length) * 100) : null;
+  const offsiteDays = fuelDays.filter((l) => l.fuel_source === "outside").length;
+  const offsiteShare = fuelDays.length > 0 ? Math.round((offsiteDays / fuelDays.length) * 100) : null;
 
   return (
     <div className="space-y-6">
@@ -159,9 +159,9 @@ export default async function MachineDetailPage({
           <p className="mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums">
             {totalFuel30.toFixed(0)} L
           </p>
-          {shraddhaShare != null && (
+          {offsiteShare != null && offsiteShare > 0 && (
             <p className="mt-1 text-xs text-ink-3">
-              {shraddhaShare}% at Shraddha pump ({shraddhaDays}/{taggedDays.length})
+              {offsiteShare}% filled offsite ({offsiteDays}/{fuelDays.length})
             </p>
           )}
         </Card>
@@ -309,9 +309,9 @@ export default async function MachineDetailPage({
                     <TD className="text-right font-mono tabular-nums">{l.closing_reading ?? "—"}</TD>
                     <TD className="text-right font-mono tabular-nums">
                       {Number(l.fuel_issued_liters).toFixed(1)}
-                      {l.fuel_source && (
+                      {l.fuel_source && l.fuel_source !== "on_site" && (
                         <span className="ml-1 rounded bg-surface-2 px-1 py-0.5 font-sans text-[10px] uppercase tracking-wide text-ink-3">
-                          {l.fuel_source === "shraddha" ? "Shraddha" : "outside"}
+                          {l.fuel_source === "shraddha" ? "Shraddha" : "offsite"}
                         </span>
                       )}
                     </TD>

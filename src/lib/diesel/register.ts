@@ -28,6 +28,11 @@ export interface RegisterRow {
   startReading: number | null; // outward only
   endReading: number | null; // outward only
   meterBroken: boolean; // outward: reading unavailable (dead meter)
+  /** Outward only. Where the fuel came from, relative to THIS site's own
+      barrel stock — null/"on_site" fills are drawn from delivered barrels
+      and reduce the balance; "shraddha"/"outside" fills never touched this
+      site's stock, so they're listed but don't move the balance. */
+  fuelSource: "on_site" | "shraddha" | "outside" | null;
   runningBalance: number;
   note: string | null;
 }
@@ -40,7 +45,12 @@ export interface RegisterResult {
   broughtForward: number;
   inwardLiters: number;
   inwardAmount: number;
+  /** Outward liters drawn from THIS site's own stock — what actually moves
+      the balance. */
   outwardLiters: number;
+  /** Outward liters filled at Shraddha's pump or offsite — never touched
+      this site's stock, shown for context but excluded from the balance. */
+  outwardNotFromStockLiters: number;
   closingBalance: number;
 }
 
@@ -78,7 +88,7 @@ export async function buildDieselRegister(
   const { data: logsRaw } = await supabase
     .from("daily_logs")
     .select(
-      "log_date, fuel_issued_liters, opening_reading, closing_reading, machines(name, registration_no, ownership, vendor_name)",
+      "log_date, fuel_issued_liters, opening_reading, closing_reading, fuel_source, machines(name, registration_no, ownership, vendor_name)",
     )
     .eq("project_id", projectId)
     .gt("fuel_issued_liters", 0)
@@ -89,6 +99,7 @@ export async function buildDieselRegister(
     fuel_issued_liters: number;
     opening_reading: number | null;
     closing_reading: number | null;
+    fuel_source: "on_site" | "shraddha" | "outside" | null;
     machines: {
       name: string;
       registration_no: string | null;
@@ -117,6 +128,7 @@ export async function buildDieselRegister(
     startReading: null,
     endReading: null,
     meterBroken: false,
+    fuelSource: null,
     runningBalance: 0,
     note: r.note,
   }));
@@ -139,6 +151,7 @@ export async function buildDieselRegister(
       startReading: l.opening_reading != null ? Number(l.opening_reading) : null,
       endReading: l.closing_reading != null ? Number(l.closing_reading) : null,
       meterBroken: l.closing_reading == null,
+      fuelSource: l.fuel_source,
       runningBalance: 0,
       note: null,
     };
@@ -157,6 +170,7 @@ export async function buildDieselRegister(
   let inwardLiters = 0;
   let inwardAmount = 0;
   let outwardLiters = 0;
+  let outwardNotFromStockLiters = 0;
   const rows: RegisterRow[] = [];
   for (const row of all) {
     const shown = row.date >= range.start;
@@ -167,8 +181,14 @@ export async function buildDieselRegister(
         inwardAmount += row.amount ?? 0;
       }
     } else {
-      balance -= row.liters;
-      if (shown) outwardLiters += row.liters;
+      // Only a fill drawn from this site's own barrels moves the balance —
+      // a Shraddha-pump or offsite fill never touched this site's stock.
+      const fromStock = row.fuelSource == null || row.fuelSource === "on_site";
+      if (fromStock) balance -= row.liters;
+      if (shown) {
+        if (fromStock) outwardLiters += row.liters;
+        else outwardNotFromStockLiters += row.liters;
+      }
     }
     if (shown) {
       row.runningBalance = Number(balance.toFixed(2));
@@ -187,6 +207,7 @@ export async function buildDieselRegister(
     inwardLiters,
     inwardAmount,
     outwardLiters,
+    outwardNotFromStockLiters,
     closingBalance: Number(balance.toFixed(2)),
   };
 }
@@ -206,6 +227,7 @@ export function registerToCsv(result: RegisterResult): string {
     "MACHINE",
     "ASSET CODE",
     "QTY (L)",
+    "SOURCE",
     "RATE",
     "AMOUNT",
     "START READING",
@@ -215,6 +237,14 @@ export function registerToCsv(result: RegisterResult): string {
   ];
   const lines = [header.join(",")];
   for (const r of result.rows) {
+    const source =
+      r.type === "OUTWARD"
+        ? r.fuelSource === "shraddha"
+          ? "Shraddha pump"
+          : r.fuelSource === "outside"
+            ? "Offsite (not from site stock)"
+            : "Site stock"
+        : "";
     lines.push(
       [
         r.date,
@@ -224,6 +254,7 @@ export function registerToCsv(result: RegisterResult): string {
         csvEscape(r.machine),
         csvEscape(r.assetCode),
         r.liters.toFixed(2),
+        csvEscape(source),
         r.rate != null ? r.rate.toFixed(2) : "",
         r.amount != null ? r.amount.toFixed(2) : "",
         r.meterBroken ? "Reading stop" : r.startReading ?? "",

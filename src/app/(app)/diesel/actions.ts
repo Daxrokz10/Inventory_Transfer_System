@@ -17,8 +17,10 @@ interface SheetRow {
   /** "breakdown"/"maintenance" days skip the reading/fuel requirement —
       the machine simply wasn't in normal use. */
   status: "normal" | "breakdown" | "maintenance";
-  /** Where fuel was filled; only meaningful at Shraddha-pump sites. */
-  fuel_source?: "shraddha" | "outside" | null;
+  /** Where fuel was filled — "outside" if the vehicle went to a pump not
+      tied to the site's own stock; otherwise the site's normal source
+      (on_site, or shraddha at the two Shraddha-pump sites). */
+  fuel_source?: "on_site" | "shraddha" | "outside" | null;
 }
 
 // Save the daily sheet for one or more machines. Exactly one report per
@@ -154,12 +156,17 @@ export async function saveDailySheet(
           : null,
       remarks: (r.remarks ?? "").trim() || null,
       status: r.status,
-      // Source only applies at Shraddha-pump sites, and only with fuel.
+      // Source only applies with fuel. Every site defaults to its normal
+      // source (on_site everywhere, shraddha at the two Shraddha-pump
+      // sites) unless the client explicitly says the vehicle went outside —
+      // re-derived here rather than trusted from the client.
       fuel_source:
-        isShraddhaPump && fuel_issued_liters > 0
+        fuel_issued_liters > 0
           ? r.fuel_source === "outside"
             ? "outside"
-            : "shraddha"
+            : isShraddhaPump
+              ? "shraddha"
+              : "on_site"
           : null,
       entered_by: user.id,
     };

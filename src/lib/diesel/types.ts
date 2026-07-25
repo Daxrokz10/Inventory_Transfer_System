@@ -76,11 +76,15 @@ export interface DailyLog {
   /** "breakdown"/"maintenance" days don't need a reading or fuel entry —
       they just record why the machine wasn't in normal use that day. */
   status: "normal" | "breakdown" | "maintenance";
-  /** For a fill at a Shraddha-pump site: 'shraddha' (drawn from the sister
-      company's pump) or 'outside' (a regular pump). Null when no fuel was
-      issued, or the site doesn't fill at Shraddha's pump. Cost is the API
-      day-rate either way. */
-  fuel_source: "shraddha" | "outside" | null;
+  /** Where a fill came from, relative to this site's own barrel stock:
+      'on_site' = drawn from a barrel delivered here (the default everywhere
+      except the two Shraddha-pump sites); 'shraddha' = filled at the sister
+      company's pump (those two sites' normal source); 'outside' = the
+      vehicle drove out and filled at a pump not tied to this site's stock.
+      Null when no fuel was issued. Cost is the API day-rate regardless.
+      Only 'on_site' (and legacy null) fills count against the site's
+      barrel balance in the Diesel Register — see register.ts. */
+  fuel_source: "on_site" | "shraddha" | "outside" | null;
 }
 
 export interface SiteRequirement {

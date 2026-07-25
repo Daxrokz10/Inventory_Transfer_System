@@ -27,7 +27,7 @@ const STATUS_LABEL: Record<Status, string> = {
   maintenance: "Under maintenance",
 };
 
-type FuelSource = "shraddha" | "outside";
+type FuelSource = "on_site" | "shraddha" | "outside";
 
 interface RowState {
   status: Status;
@@ -50,8 +50,9 @@ export function DailySheet({
   logDate: string;
   dieselPrice: number | null;
   petrolPrice: number | null;
-  /** True when this site fills at the sister company (Shraddha) pump — the
-      only case where the per-fill source picker is shown. */
+  /** True when this site fills at the sister company (Shraddha) pump —
+      changes the source picker's options (Shraddha pump / Outside pump)
+      instead of the default (On site / Offsite) shown everywhere else. */
   shraddhaPump?: boolean;
 }) {
   const editable = useMemo(
@@ -62,11 +63,19 @@ export function DailySheet({
   const initial = useMemo(() => {
     const map: Record<string, RowState> = {};
     for (const m of editable) {
-      // At a Shraddha-pump site, the default fill is from Shraddha's pump.
-      map[m.id] = { status: "normal", reading: "", fuel: "", source: "shraddha", remarks: "" };
+      // Default source: Shraddha's pump at those two sites, this site's own
+      // stock everywhere else — the site person only touches it to flag the
+      // exception (a vehicle that went to fill outside).
+      map[m.id] = {
+        status: "normal",
+        reading: "",
+        fuel: "",
+        source: shraddhaPump ? "shraddha" : "on_site",
+        remarks: "",
+      };
     }
     return map;
-  }, [editable]);
+  }, [editable, shraddhaPump]);
 
   const [rows, setRows] = useState(initial);
   const [error, formAction, pending] = useActionState(saveDailySheet, null);
@@ -84,8 +93,8 @@ export function DailySheet({
       status: r.status,
       closing_reading: normal && !m.meter_broken ? num(r.reading) : null,
       fuel_issued_liters: fuel,
-      // Source only tracked at Shraddha-pump sites, and only with fuel.
-      fuel_source: shraddhaPump && fuel > 0 ? r.source : null,
+      // Source tracked at every site now, only meaningful with fuel.
+      fuel_source: fuel > 0 ? r.source : null,
       remarks: r.remarks.trim() || null,
     };
   });
@@ -167,9 +176,9 @@ export function DailySheet({
                     </TD>
                     <TD className="text-right font-mono tabular-nums text-ink-2">
                       {Number(log.fuel_issued_liters).toFixed(1)}
-                      {log.fuel_source && (
+                      {log.fuel_source && log.fuel_source !== "on_site" && (
                         <span className="ml-1 rounded bg-surface-2 px-1 py-0.5 font-sans text-[10px] uppercase tracking-wide text-ink-3">
-                          {log.fuel_source === "shraddha" ? "Shraddha" : "outside"}
+                          {log.fuel_source === "shraddha" ? "Shraddha" : "offsite"}
                         </span>
                       )}
                     </TD>
@@ -258,7 +267,7 @@ export function DailySheet({
                           className="w-24 text-right"
                           aria-label={`${m.name} fuel`}
                         />
-                        {shraddhaPump && normal && fuel > 0 && (
+                        {normal && fuel > 0 && (
                           <Select
                             value={r.source}
                             onChange={(e) =>
@@ -267,8 +276,17 @@ export function DailySheet({
                             className="w-28 text-xs"
                             aria-label={`${m.name} fuel source`}
                           >
-                            <option value="shraddha">Shraddha pump</option>
-                            <option value="outside">Outside pump</option>
+                            {shraddhaPump ? (
+                              <>
+                                <option value="shraddha">Shraddha pump</option>
+                                <option value="outside">Outside pump</option>
+                              </>
+                            ) : (
+                              <>
+                                <option value="on_site">On site</option>
+                                <option value="outside">Offsite</option>
+                              </>
+                            )}
                           </Select>
                         )}
                       </div>

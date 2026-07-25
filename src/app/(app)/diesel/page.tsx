@@ -817,9 +817,9 @@ function DailyLogsBySite({
                     </TD>
                     <TD className="text-right font-mono tabular-nums">
                       {Number(l.fuel_issued_liters).toFixed(1)}
-                      {l.fuel_source && (
+                      {l.fuel_source && l.fuel_source !== "on_site" && (
                         <span className="ml-1 rounded bg-surface-2 px-1 py-0.5 font-sans text-[10px] uppercase tracking-wide text-ink-3">
-                          {l.fuel_source === "shraddha" ? "Shraddha" : "outside"}
+                          {l.fuel_source === "shraddha" ? "Shraddha" : "offsite"}
                         </span>
                       )}
                     </TD>

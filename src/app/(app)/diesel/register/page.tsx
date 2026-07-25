@@ -134,6 +134,11 @@ export default async function DieselRegisterPage({
         <Card>
           <CardLabel>Outward · {month}</CardLabel>
           <p className="mt-2 font-mono text-xl font-semibold tabular-nums text-danger">−{L(register.outwardLiters)}</p>
+          {register.outwardNotFromStockLiters > 0 && (
+            <p className="mt-1 text-xs text-ink-3">
+              +{L(register.outwardNotFromStockLiters)} offsite/Shraddha — not from site stock
+            </p>
+          )}
         </Card>
         <Card>
           <CardLabel>Closing balance</CardLabel>
@@ -184,9 +189,13 @@ export default async function DieselRegisterPage({
                     {r.type === "INWARD" ? (
                       <Badge tone="good">Inward</Badge>
                     ) : (
-                      <Badge tone={r.subGroup === "EXTERNAL" ? "warn" : "neutral"}>
-                        Out · {r.subGroup === "EXTERNAL" ? "hired" : "own"}
-                      </Badge>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Badge tone={r.subGroup === "EXTERNAL" ? "warn" : "neutral"}>
+                          Out · {r.subGroup === "EXTERNAL" ? "hired" : "own"}
+                        </Badge>
+                        {r.fuelSource === "shraddha" && <Badge tone="warn">Shraddha</Badge>}
+                        {r.fuelSource === "outside" && <Badge tone="neutral">Offsite</Badge>}
+                      </div>
                     )}
                   </TD>
                   <TD>
@@ -231,10 +240,13 @@ export default async function DieselRegisterPage({
       </Card>
 
       <p className="text-xs text-ink-3">
-        Running balance = opening stock + inward − outward. It’s a shown figure, not an alarm — its
-        accuracy depends on every barrel and every machine fill being logged. A drift from the
-        physical count means something wasn’t entered (or leaked); re-set the opening stock after a
-        fresh count to re-anchor it.
+        Running balance = opening stock + inward − outward from this site's own stock only. A fill
+        tagged <span className="font-medium text-ink-2">Offsite</span> or{" "}
+        <span className="font-medium text-ink-2">Shraddha</span> is still listed here for a complete
+        record, but it never drew from this site's barrels, so it doesn't move the balance. It's a
+        shown figure, not an alarm — its accuracy depends on every barrel and every on-site fill
+        being logged. A drift from the physical count means something wasn't entered (or leaked);
+        re-set the opening stock after a fresh count to re-anchor it.
       </p>
     </div>
   );
