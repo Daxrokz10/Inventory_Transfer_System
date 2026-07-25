@@ -2,7 +2,6 @@
 
 import { useActionState } from "react";
 import { login } from "./actions";
-import { SgcLogo } from "@/components/SgcLogo";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Field";
 
@@ -13,7 +12,14 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-sm">
         <div className="mb-6 flex items-center gap-4">
-          <SgcLogo size={56} />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/sgc-logo.png"
+            alt="Shree Ganesh Corporation"
+            width={56}
+            height={56}
+            className="h-14 w-14 rounded-md object-contain"
+          />
           <div>
             <h1 className="text-xl font-bold uppercase tracking-[0.12em] text-ink">
               SGC <span className="text-ink-3">Suite</span>

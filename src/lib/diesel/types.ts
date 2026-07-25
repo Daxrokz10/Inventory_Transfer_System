@@ -14,6 +14,10 @@ export interface Machine {
       (silos, batching plants, tower cranes) and office vehicles. They're
       still tracked as assets but stay off the daily fuel report. */
   track_fuel: boolean;
+  /** True if this machine gets a reading (km/hours) field on the daily
+      report, independent of track_fuel — e.g. batching plants log hours
+      but consume no diesel we track. */
+  track_meter: boolean;
   /** Persistent latest known meter reading — the single source of truth
       independent of which day's report last touched it. */
   current_reading: number | null;
@@ -25,6 +29,9 @@ export interface Machine {
       its current site expires. Null = no deadline (permanent fixture).
       Cleared on transfer. */
   so_until: string | null;
+  /** Set by a site supervisor when the physical odometer/hour-meter
+      fails. Only an admin can clear it — see set_meter_broken() RPC. */
+  meter_broken: boolean;
 }
 
 export type SoStatus =
@@ -69,6 +76,25 @@ export interface DailyLog {
   /** "breakdown"/"maintenance" days don't need a reading or fuel entry —
       they just record why the machine wasn't in normal use that day. */
   status: "normal" | "breakdown" | "maintenance";
+  /** For a fill at a Shraddha-pump site: 'shraddha' (drawn from the sister
+      company's pump) or 'outside' (a regular pump). Null when no fuel was
+      issued, or the site doesn't fill at Shraddha's pump. Cost is the API
+      day-rate either way. */
+  fuel_source: "shraddha" | "outside" | null;
+}
+
+export interface SiteRequirement {
+  id: string;
+  project_id: string;
+  machine_type: string;
+  quantity: number;
+  needed_from: string;
+  /** null = open-ended / ongoing need — no defined end date. */
+  needed_until: string | null;
+  status: "open" | "fulfilled" | "cancelled";
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
 }
 
 export interface MachineRequest {
@@ -83,6 +109,23 @@ export interface MachineRequest {
   resolved_by: string | null;
   resolved_at: string | null;
   resolution_note: string | null;
+}
+
+// A barrel / diesel delivery arriving on site (procurement) — separate
+// from daily_logs, which is fuel issued to machines (consumption).
+export interface FuelReceipt {
+  id: string;
+  project_id: string;
+  receipt_date: string;
+  liters: number;
+  /** Number of drums, if counted — informational; liters is authoritative. */
+  barrels: number | null;
+  rate_per_liter: number | null;
+  total_cost: number | null;
+  vendor: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
 }
 
 export interface AnomalyFlag {

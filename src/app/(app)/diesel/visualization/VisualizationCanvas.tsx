@@ -21,6 +21,23 @@ import { soStatus, type Machine } from "@/lib/diesel/types";
 const SCENE = { width: 2800, height: 1800, minScale: 0.3, maxScale: 1.6 };
 const STORAGE_KEY = "diesel_viz_positions_v1";
 
+// Schematic status: each machine is a lamp, each site's conduit inherits the
+// worst lamp feeding it, so fleet health reads as a wiring diagram.
+type SiteTone = "ok" | "caution" | "alarm";
+const TONE_RANK = { ok: 0, caution: 1, alarm: 2 } as const;
+
+function machineTone(m: Machine): "ok" | "caution" | "alarm" | "off" {
+  if (!m.track_fuel) return "off";
+  const s = soStatus(m).state;
+  return s === "expired" ? "alarm" : s === "soon" ? "caution" : "ok";
+}
+
+const EDGE_STYLE: Record<SiteTone, { stroke: string; opacity: string; width: string; dash: string }> = {
+  ok: { stroke: "var(--color-accent)", opacity: "0.38", width: "2", dash: "" },
+  caution: { stroke: "var(--color-caution-led)", opacity: "0.75", width: "2.25", dash: "" },
+  alarm: { stroke: "var(--color-alarm-led)", opacity: "0.9", width: "2.75", dash: "" },
+};
+
 interface Point {
   x: number;
   y: number;
@@ -75,6 +92,7 @@ export function VisualizationCanvas({
 
   const view = useRef({ x: 0, y: 0, scale: 0.82 });
   const pointer = useRef<PointerState | null>(null);
+  const siteToneRef = useRef<Map<string, SiteTone>>(new Map());
 
   useEffect(() => {
     try {
@@ -202,13 +220,36 @@ export function VisualizationCanvas({
         "d",
         `M ${start.point.x} ${start.point.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.point.x} ${end.point.y}`,
       );
-      path.setAttribute("stroke", "var(--color-accent)");
-      path.setAttribute("stroke-width", "2");
+      // Conduit inherits the site's worst status — a red run reads at a glance.
+      const siteId = key.startsWith("site-") ? key.slice(5) : null;
+      const tone = (siteId && siteToneRef.current.get(siteId)) || "ok";
+      const s = EDGE_STYLE[tone];
+      path.setAttribute("stroke", s.stroke);
+      path.setAttribute("stroke-width", s.width);
       path.setAttribute("fill", "none");
-      path.setAttribute("opacity", "0.45");
+      path.setAttribute("opacity", s.opacity);
       svg.appendChild(path);
     }
   }, []);
+
+  // Worst lamp per site → conduit colour. Kept in a ref so drawConnections
+  // (deps: []) reads the latest without being re-created on every change.
+  const siteTones = useMemo(() => {
+    const map = new Map<string, SiteTone>();
+    for (const m of machines) {
+      if (!m.is_active) continue;
+      const t = machineTone(m);
+      const tone: SiteTone = t === "alarm" ? "alarm" : t === "caution" ? "caution" : "ok";
+      const prev = map.get(m.project_id);
+      if (!prev || TONE_RANK[tone] > TONE_RANK[prev]) map.set(m.project_id, tone);
+    }
+    return map;
+  }, [machines]);
+
+  useEffect(() => {
+    siteToneRef.current = siteTones;
+    drawConnections();
+  }, [siteTones, drawConnections]);
 
   // Zoom/pan so every node fits inside the viewport with a little padding.
   // This is what stops the outer sites (Office / Store / godown, which land
@@ -491,10 +532,25 @@ export function VisualizationCanvas({
       </div>
 
       {error && <p className="text-sm text-danger">{error}</p>}
-      <p className="text-xs text-ink-3">
-        Drag internal machines between site boxes to relocate them. External/hired machines aren&apos;t
-        draggable. Pan by dragging empty space; scroll to zoom.
-      </p>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-ink-3">
+        <span>
+          Drag internal machines between sites to relocate. Pan on empty space; scroll to zoom.
+        </span>
+        <span className="flex items-center gap-3 font-mono text-[11px] uppercase tracking-wide">
+          <span className="flex items-center gap-1.5">
+            <span className="led-dot" data-tone="ok" aria-hidden /> running
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="led-dot" data-tone="caution" aria-hidden /> SO soon
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="led-dot" data-tone="alarm" aria-hidden /> SO expired
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="led-dot" data-tone="off" aria-hidden /> asset
+          </span>
+        </span>
+      </div>
 
       <div
         ref={viewportRef}
@@ -509,31 +565,42 @@ export function VisualizationCanvas({
         className="relative h-[70vh] overflow-hidden rounded-lg border border-line bg-surface-2 select-none"
         style={{ touchAction: "none" }}
       >
-        <div ref={sceneRef} className="absolute left-0 top-0">
+        <div ref={sceneRef} className="blueprint-grid absolute left-0 top-0">
           <svg ref={linesRef} className="pointer-events-none absolute left-0 top-0" />
 
-          {/* Hub */}
+          {/* Hub — the machine-pool bus every conduit runs back to */}
           <div
             ref={(node) => {
               if (node) nodeRefs.current.set("hub", node);
             }}
-            className="viz-node absolute w-64 rounded-lg border border-line bg-surface p-4 shadow-sm"
+            className="viz-node absolute w-64 rounded-lg border border-t-2 border-line border-t-accent bg-surface p-4 shadow-sm"
             style={{ left: getPosition("hub").x, top: getPosition("hub").y }}
           >
             <div
               onPointerDown={(e) => startNodeDrag(e, "hub")}
-              className="cursor-grab text-xs font-semibold uppercase tracking-wide text-ink-3"
+              className="cursor-grab font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-3"
             >
-              Total Machine Pool <span className="normal-case text-ink-3">· drag me</span>
+              Machine Pool <span className="text-ink-3">· drag me</span>
             </div>
-            <p className="mt-1 text-2xl font-semibold text-ink">{totalCount}</p>
-            <p className="mt-1 text-xs text-ink-3">{sites.length} sites</p>
+            <p className="mt-1 font-mono text-3xl font-semibold tabular-nums text-ink">
+              {totalCount}
+            </p>
+            <p className="mt-1 font-mono text-[11px] tracking-wide text-ink-3">
+              {sites.length} sites wired
+            </p>
           </div>
 
-          {/* Site nodes */}
+          {/* Site nodes — junction boxes, framed by their worst lamp */}
           {sites.map((site, index) => {
             const key = nodeKey(site.id);
             const siteMachines = machinesForSite(site.id);
+            const tone = siteTones.get(site.id) ?? "ok";
+            const frame =
+              tone === "alarm"
+                ? "border-danger/70"
+                : tone === "caution"
+                  ? "border-warn/60"
+                  : "border-line";
             return (
               <div
                 key={site.id}
@@ -541,27 +608,37 @@ export function VisualizationCanvas({
                   if (node) nodeRefs.current.set(key, node);
                 }}
                 data-site-id={site.id}
-                className="viz-node viz-column absolute w-80 rounded-lg border border-line bg-surface shadow-sm"
+                className={`viz-node viz-column absolute w-80 rounded-lg border bg-surface shadow-sm ${frame}`}
                 style={{ left: getPosition(key, index).x, top: getPosition(key, index).y }}
               >
                 <div
                   onPointerDown={(e) => startNodeDrag(e, key)}
-                  className="flex cursor-grab items-center justify-between rounded-t-lg border-b border-line bg-surface-2 px-3 py-2"
+                  className="flex cursor-grab items-center justify-between gap-2 rounded-t-lg border-b border-line bg-surface-2 px-3 py-2"
                 >
-                  <strong className="text-sm">{site.name}</strong>
-                  <span className="text-xs text-ink-3">{siteMachines.length} machines</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="led-dot"
+                      data-tone={tone}
+                      aria-hidden
+                    />
+                    <strong className="truncate text-sm">{site.name}</strong>
+                  </span>
+                  <span className="shrink-0 font-mono text-[11px] tabular-nums text-ink-3">
+                    {siteMachines.length}
+                  </span>
                 </div>
                 <div className="viz-dropzone flex max-h-72 flex-col gap-1.5 overflow-y-auto p-2">
                   {siteMachines.length === 0 && (
-                    <p className="p-2 text-xs text-ink-3">No machines</p>
+                    <p className="p-2 font-mono text-[11px] text-ink-3">no machines</p>
                   )}
                   {siteMachines.map((m) => {
                     const so = soStatus(m);
+                    const mtone = machineTone(m);
                     return (
                       <div
                         key={m.id}
                         onPointerDown={(e) => startMachineDrag(e, m)}
-                        className={`viz-machine rounded-md border bg-surface px-2.5 py-1.5 text-xs ${
+                        className={`viz-machine flex gap-2 rounded-md border bg-surface px-2.5 py-1.5 text-xs ${
                           so.state === "expired"
                             ? "border-danger ring-1 ring-danger"
                             : "border-line-strong"
@@ -569,17 +646,26 @@ export function VisualizationCanvas({
                           m.ownership === "internal" ? "cursor-grab" : "cursor-default opacity-70"
                         }`}
                       >
-                        <p className="font-medium text-ink">{m.name}</p>
-                        <p className="text-ink-3">
-                          {m.machine_type}
-                          {m.registration_no ? ` · ${m.registration_no}` : ""}
-                          {m.ownership === "external" ? " · external" : ""}
-                        </p>
-                        {so.state === "expired" && (
-                          <p className="mt-0.5 font-semibold text-danger">
-                            SO expired · {so.days}d over
-                          </p>
-                        )}
+                        <span
+                          className="led-dot mt-1"
+                          data-tone={mtone}
+                          aria-hidden
+                        />
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-ink">
+                            {m.name}
+                          </span>
+                          <span className="block truncate font-mono text-[10px] text-ink-3">
+                            {m.machine_type}
+                            {m.registration_no ? ` · ${m.registration_no}` : ""}
+                            {m.ownership === "external" ? " · ext" : ""}
+                          </span>
+                          {so.state === "expired" && (
+                            <span className="mt-0.5 block font-semibold text-danger">
+                              SO expired · {so.days}d over
+                            </span>
+                          )}
+                        </span>
                       </div>
                     );
                   })}

@@ -45,11 +45,14 @@ const inventoryAdminNav: NavItem[] = [
 const dieselSupervisorNav: NavItem[] = [
   { href: "/diesel", label: "Daily Report" },
   { href: "/diesel/machines", label: "Machinery" },
+  { href: "/diesel/register", label: "Diesel Register" },
 ];
 
 const dieselAdminNav: NavItem[] = [
   ...dieselSupervisorNav,
   { href: "/diesel/anomalies", label: "Anomalies" },
+  { href: "/diesel/planning", label: "Planning" },
+  { href: "/diesel/reports", label: "Reports" },
   { href: "/diesel/sites", label: "Sites" },
   { href: "/diesel/visualization", label: "Visualization" },
 ];

@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardLabel } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -5,14 +6,15 @@ import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Field";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
-import type { DailyLog, Machine } from "@/lib/diesel/types";
+import type { DailyLog, Machine, FuelReceipt } from "@/lib/diesel/types";
 import { getPricesForCity } from "@/lib/diesel/fuelPrice";
 import { cityForState, soStatus } from "@/lib/diesel/types";
 import { DailySheet } from "./DailySheet";
+import { FuelReceiptForm } from "./FuelReceiptForm";
 import { MachineRequestButtons } from "./machines/MachineRequestButtons";
 import { RequestResolveControls } from "./machines/RequestResolveControls";
 import { EfficiencyChart, type EfficiencyPoint } from "./EfficiencyChart";
-import { resolveFlag } from "./actions";
+import { resolveFlag, deleteFuelReceipt } from "./actions";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -295,29 +297,30 @@ export default async function DieselPage({
 
   const siteFilter = isAdmin ? (sp.site ?? null) : homeProjectId;
 
-  // Only fuel-tracked machines belong on the fuel report / dashboard;
-  // non-fuel assets (silos, office cars, …) live on the Machinery page.
+  // Machines that ask for fuel OR just a reading (e.g. a batching plant's
+  // hours) belong on the daily report; pure fixtures with neither (tower
+  // cranes, silos, office cars) live only on the Machinery page.
   const machinesQuery = supabase
     .from("machines")
     .select("*")
     .eq("is_active", true)
-    .eq("track_fuel", true)
+    .or("track_fuel.eq.true,track_meter.eq.true")
     .order("name");
   if (siteFilter) machinesQuery.eq("project_id", siteFilter);
 
   const [{ data: machinesRaw }, projectsRes, siteRes] = await Promise.all([
     machinesQuery,
     isAdmin
-      ? supabase.from("projects").select("id, name, state").eq("is_active", true).order("name")
+      ? supabase.from("projects").select("id, name, code, state").eq("is_active", true).order("name")
       : Promise.resolve({ data: null }),
     siteFilter
-      ? supabase.from("projects").select("id, name, state").eq("id", siteFilter).single()
+      ? supabase.from("projects").select("id, name, state, shraddha_pump").eq("id", siteFilter).single()
       : Promise.resolve({ data: null }),
   ]);
 
   const machines = (machinesRaw ?? []) as Machine[];
-  const projects = projectsRes.data ?? [];
-  const site = siteRes.data as { id: string; name: string; state: string | null } | null;
+  const projects = (projectsRes.data ?? []) as { id: string; name: string; code: string | null; state: string | null }[];
+  const site = siteRes.data as { id: string; name: string; state: string | null; shraddha_pump?: boolean } | null;
   const siteCity = cityForState(site?.state ?? null);
 
   // SO / deployment-deadline status across ALL active machines at the
@@ -363,7 +366,7 @@ export default async function DieselPage({
   if (!isAdmin) {
     const machineIds = machines.map((m) => m.id);
 
-    const [{ data: existingRaw }, prices, { data: flagsRaw }] = await Promise.all([
+    const [{ data: existingRaw }, prices, { data: flagsRaw }, { data: receiptsRaw }] = await Promise.all([
       machineIds.length
         ? supabase
             .from("daily_logs")
@@ -378,7 +381,16 @@ export default async function DieselPage({
         .eq("resolved", false)
         .order("created_at", { ascending: false })
         .limit(10),
+      homeProjectId
+        ? supabase
+            .from("fuel_receipts")
+            .select("*")
+            .eq("project_id", homeProjectId)
+            .order("receipt_date", { ascending: false })
+            .limit(10)
+        : Promise.resolve({ data: [] }),
     ]);
+    const receipts = (receiptsRaw ?? []) as FuelReceipt[];
 
     const existing: Record<string, DailyLog> = {};
     for (const log of (existingRaw ?? []) as DailyLog[]) {
@@ -424,7 +436,41 @@ export default async function DieselPage({
           logDate={date}
           dieselPrice={prices.diesel}
           petrolPrice={prices.petrol}
+          shraddhaPump={site?.shraddha_pump ?? false}
         />
+
+        <Card className="p-0">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+            <div>
+              <h2 className="text-sm font-semibold">Diesel received</h2>
+              <p className="text-xs text-ink-3">
+                Record a barrel / delivery arriving on site — separate from the fuel logged to machines above
+              </p>
+            </div>
+            {homeProjectId && <FuelReceiptForm projectId={homeProjectId} today={today} />}
+          </div>
+          {receipts.length > 0 && (
+            <ul className="divide-y divide-line border-t border-line">
+              {receipts.map((r) => (
+                <li key={r.id} className="flex items-center justify-between gap-3 px-5 py-2.5 text-sm">
+                  <span className="text-ink-2">
+                    <span className="font-mono tabular-nums text-ink">{Number(r.liters).toFixed(0)} L</span>
+                    {r.barrels ? ` · ${r.barrels} barrel${r.barrels === 1 ? "" : "s"}` : ""} ·{" "}
+                    {r.receipt_date}
+                    {r.total_cost != null ? ` · ${inr(Number(r.total_cost))}` : ""}
+                    {r.vendor ? ` · ${r.vendor}` : ""}
+                  </span>
+                  <form action={deleteFuelReceipt}>
+                    <input type="hidden" name="receipt_id" value={r.id} />
+                    <button type="submit" className="text-xs text-ink-3 hover:text-danger">
+                      Remove
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
 
         {flags.length > 0 && (
           <Card className="p-0">
@@ -507,6 +553,21 @@ export default async function DieselPage({
   const kmPoints = points.filter((p) => p.unit === "km/L");
   const hourPoints = points.filter((p) => p.unit === "L/hr");
 
+  // Per-row mileage (this day's own km/L or L/hr) and each machine's
+  // current running average, both keyed off the same fetched logs —
+  // machine_id + date is unique because of the one-report-per-day rule.
+  const allPoints = efficiencyPoints(machines, logs);
+  const rowMetric = new Map(
+    allPoints.map((p) => [`${p.machine_id}|${p.entry_date}`, p]),
+  );
+  const runningAvgByMachine = new Map<string, { value: number; unit: string }>();
+  for (const m of machines) {
+    const vals = allPoints.filter((p) => p.machine_id === m.id);
+    if (vals.length === 0) continue;
+    const avg = vals.reduce((s, p) => s + p.value, 0) / vals.length;
+    runningAvgByMachine.set(m.id, { value: avg, unit: vals[0].unit });
+  }
+
   const cutoff = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
   const recent = logs.filter((l) => l.log_date >= cutoff);
   const litres30 = recent.reduce((s, l) => s + Number(l.fuel_issued_liters), 0);
@@ -572,25 +633,25 @@ export default async function DieselPage({
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card>
           <CardLabel>Fuel issued · 30 days</CardLabel>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">
+          <p className="mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums">
             {litres30.toLocaleString("en-IN", { maximumFractionDigits: 0 })} L
           </p>
         </Card>
         <Card>
           <CardLabel>Cost · 30 days</CardLabel>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">
+          <p className="mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums">
             {inr(cost30)}
           </p>
         </Card>
         <Card>
           <CardLabel>Sites reported today</CardLabel>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">
+          <p className="mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums">
             {reportedToday}
           </p>
         </Card>
         <Card>
           <CardLabel>Open flags</CardLabel>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">
+          <p className="mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums">
             {flags.length}
           </p>
         </Card>
@@ -664,30 +725,81 @@ export default async function DieselPage({
         </div>
       )}
 
-      <Card className="overflow-x-auto p-0">
-        <Table>
-          <thead>
-            <tr>
-              <TH>Date</TH>
-              <TH>Machine</TH>
-              <TH className="text-right">Opening</TH>
-              <TH className="text-right">Closing</TH>
-              <TH className="text-right">Fuel (L)</TH>
-              <TH className="text-right">Rate</TH>
-              <TH className="text-right">Cost</TH>
-              <TH>Remarks</TH>
-            </tr>
-          </thead>
-          <tbody>
-            {logs.length === 0 ? (
-              <tr>
-                <TD colSpan={8}>
-                  <EmptyState message="No daily reports yet." />
-                </TD>
+      <DailyLogsBySite
+        logs={logs}
+        machineById={machineById}
+        projects={projects}
+        rowMetric={rowMetric}
+        runningAvgByMachine={runningAvgByMachine}
+      />
+    </div>
+  );
+}
+
+function DailyLogsBySite({
+  logs,
+  machineById,
+  projects,
+  rowMetric,
+  runningAvgByMachine,
+}: {
+  logs: DailyLog[];
+  machineById: Map<string, Machine>;
+  projects: { id: string; name: string; code: string | null }[];
+  rowMetric: Map<string, EfficiencyPoint>;
+  runningAvgByMachine: Map<string, { value: number; unit: string }>;
+}) {
+  const siteLabel = new Map(
+    projects.map((p) => [p.id, p.code ? `${p.code} · ${p.name}` : p.name]),
+  );
+
+  const groups = new Map<string, DailyLog[]>();
+  for (const l of logs) {
+    const key = siteLabel.get(l.project_id) ?? "— Unassigned";
+    (groups.get(key) ?? groups.set(key, []).get(key)!).push(l);
+  }
+  const orderedGroups = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+  if (logs.length === 0) {
+    return (
+      <Card className="p-0">
+        <EmptyState message="No daily reports yet." />
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="overflow-x-auto p-0">
+      <Table>
+        <thead>
+          <tr>
+            <TH>Date</TH>
+            <TH>Machine</TH>
+            <TH className="text-right">Opening</TH>
+            <TH className="text-right">Closing</TH>
+            <TH className="text-right">Fuel (L)</TH>
+            <TH className="text-right">Mileage</TH>
+            <TH className="text-right">Running avg</TH>
+            <TH className="text-right">Rate</TH>
+            <TH className="text-right">Cost</TH>
+            <TH>Remarks</TH>
+          </tr>
+        </thead>
+        <tbody>
+          {orderedGroups.map(([label, siteLogs]) => (
+            <Fragment key={label}>
+              <tr className="bg-surface-2">
+                <td colSpan={10} className="border-y border-line px-4 py-2 text-sm font-semibold text-ink">
+                  {label}
+                  <span className="ml-2 text-xs font-normal text-ink-3">
+                    {siteLogs.length} report{siteLogs.length === 1 ? "" : "s"}
+                  </span>
+                </td>
               </tr>
-            ) : (
-              logs.slice(0, 50).map((l) => {
+              {siteLogs.map((l) => {
                 const m = machineById.get(l.machine_id);
+                const metric = rowMetric.get(`${l.machine_id}|${l.log_date}`);
+                const avg = runningAvgByMachine.get(l.machine_id);
                 return (
                   <TRow key={l.id}>
                     <TD className="whitespace-nowrap">{l.log_date}</TD>
@@ -697,21 +809,32 @@ export default async function DieselPage({
                         <span className="text-ink-3"> · {m.registration_no}</span>
                       )}
                     </TD>
-                    <TD className="text-right tabular-nums">
+                    <TD className="text-right font-mono tabular-nums">
                       {l.opening_reading ?? "—"}
                     </TD>
-                    <TD className="text-right tabular-nums">
+                    <TD className="text-right font-mono tabular-nums">
                       {l.closing_reading ?? "—"}
                     </TD>
-                    <TD className="text-right tabular-nums">
+                    <TD className="text-right font-mono tabular-nums">
                       {Number(l.fuel_issued_liters).toFixed(1)}
+                      {l.fuel_source && (
+                        <span className="ml-1 rounded bg-surface-2 px-1 py-0.5 font-sans text-[10px] uppercase tracking-wide text-ink-3">
+                          {l.fuel_source === "shraddha" ? "Shraddha" : "outside"}
+                        </span>
+                      )}
                     </TD>
-                    <TD className="text-right tabular-nums">
+                    <TD className="text-right font-mono tabular-nums text-ink-2">
+                      {metric ? `${metric.value.toFixed(2)} ${metric.unit}` : "—"}
+                    </TD>
+                    <TD className="text-right font-mono tabular-nums text-ink-2">
+                      {avg ? `${avg.value.toFixed(2)} ${avg.unit}` : "—"}
+                    </TD>
+                    <TD className="text-right font-mono tabular-nums">
                       {l.rate_per_liter != null
                         ? `₹${Number(l.rate_per_liter).toFixed(2)}`
                         : "—"}
                     </TD>
-                    <TD className="text-right tabular-nums">
+                    <TD className="text-right font-mono tabular-nums">
                       {l.total_cost != null ? inr(Number(l.total_cost)) : "—"}
                     </TD>
                     <TD className="max-w-56 truncate text-ink-2">
@@ -719,11 +842,11 @@ export default async function DieselPage({
                     </TD>
                   </TRow>
                 );
-              })
-            )}
-          </tbody>
-        </Table>
-      </Card>
-    </div>
+              })}
+            </Fragment>
+          ))}
+        </tbody>
+      </Table>
+    </Card>
   );
 }

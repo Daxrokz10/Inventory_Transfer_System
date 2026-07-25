@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Input, Select } from "@/components/ui/Field";
 import { Table, TH, TRow, TD } from "@/components/ui/Table";
+import { StatusPill } from "@/components/ui/states";
 import type { DailyLog, Machine } from "@/lib/diesel/types";
 
 /* One report per machine per day. A machine already reported for this
@@ -26,10 +27,13 @@ const STATUS_LABEL: Record<Status, string> = {
   maintenance: "Under maintenance",
 };
 
+type FuelSource = "shraddha" | "outside";
+
 interface RowState {
   status: Status;
   reading: string;
   fuel: string;
+  source: FuelSource;
   remarks: string;
 }
 
@@ -39,12 +43,16 @@ export function DailySheet({
   logDate,
   dieselPrice,
   petrolPrice,
+  shraddhaPump = false,
 }: {
   machines: Machine[];
   existing: Record<string, DailyLog>;
   logDate: string;
   dieselPrice: number | null;
   petrolPrice: number | null;
+  /** True when this site fills at the sister company (Shraddha) pump — the
+      only case where the per-fill source picker is shown. */
+  shraddhaPump?: boolean;
 }) {
   const editable = useMemo(
     () => machines.filter((m) => !existing[m.id]),
@@ -54,7 +62,8 @@ export function DailySheet({
   const initial = useMemo(() => {
     const map: Record<string, RowState> = {};
     for (const m of editable) {
-      map[m.id] = { status: "normal", reading: "", fuel: "", remarks: "" };
+      // At a Shraddha-pump site, the default fill is from Shraddha's pump.
+      map[m.id] = { status: "normal", reading: "", fuel: "", source: "shraddha", remarks: "" };
     }
     return map;
   }, [editable]);
@@ -69,11 +78,14 @@ export function DailySheet({
     const r = rows[m.id];
     const num = (s: string) => (s.trim() === "" ? null : Number(s));
     const normal = r.status === "normal";
+    const fuel = normal && m.track_fuel ? Number(r.fuel) || 0 : 0;
     return {
       machine_id: m.id,
       status: r.status,
-      closing_reading: normal ? num(r.reading) : null,
-      fuel_issued_liters: normal ? Number(r.fuel) || 0 : 0,
+      closing_reading: normal && !m.meter_broken ? num(r.reading) : null,
+      fuel_issued_liters: fuel,
+      // Source only tracked at Shraddha-pump sites, and only with fuel.
+      fuel_source: shraddhaPump && fuel > 0 ? r.source : null,
       remarks: r.remarks.trim() || null,
     };
   });
@@ -124,7 +136,15 @@ export function DailySheet({
                 return (
                   <TRow key={m.id} className="align-top bg-surface-2/40">
                     <TD>
-                      <p className="font-medium">{m.name}</p>
+                      <p className="flex flex-wrap items-center gap-1.5 font-medium">
+                        {m.name}
+                        <Badge
+                          tone={m.ownership === "external" ? "warn" : "accent"}
+                          className="px-1.5 py-0 text-[10px]"
+                        >
+                          {m.ownership === "external" ? "External" : "Internal"}
+                        </Badge>
+                      </p>
                       <p className="text-xs text-ink-3">
                         {m.machine_type}
                         {m.registration_no ? ` · ${m.registration_no}` : ""} ·{" "}
@@ -133,20 +153,27 @@ export function DailySheet({
                     </TD>
                     <TD>
                       {log.status === "normal" ? (
-                        <Badge tone="good">Reported</Badge>
+                        <StatusPill tone="ok">Reported</StatusPill>
                       ) : (
-                        <Badge tone="warn">{STATUS_LABEL[log.status]}</Badge>
+                        <StatusPill tone="caution">
+                          {STATUS_LABEL[log.status]}
+                        </StatusPill>
                       )}
                     </TD>
-                    <TD className="text-right tabular-nums text-ink-2">
+                    <TD className="text-right font-mono tabular-nums text-ink-2">
                       {log.status === "normal"
                         ? `${log.opening_reading ?? "—"} → ${log.closing_reading ?? "—"} ${unit}`
                         : "—"}
                     </TD>
-                    <TD className="text-right tabular-nums text-ink-2">
+                    <TD className="text-right font-mono tabular-nums text-ink-2">
                       {Number(log.fuel_issued_liters).toFixed(1)}
+                      {log.fuel_source && (
+                        <span className="ml-1 rounded bg-surface-2 px-1 py-0.5 font-sans text-[10px] uppercase tracking-wide text-ink-3">
+                          {log.fuel_source === "shraddha" ? "Shraddha" : "outside"}
+                        </span>
+                      )}
                     </TD>
-                    <TD className="text-right tabular-nums text-ink-2">
+                    <TD className="text-right font-mono tabular-nums text-ink-2">
                       {log.total_cost != null ? `₹${Number(log.total_cost).toFixed(0)}` : "—"}
                     </TD>
                     <TD className="text-ink-2">{log.remarks ?? "—"}</TD>
@@ -161,7 +188,15 @@ export function DailySheet({
               return (
                 <TRow key={m.id} className="align-top">
                   <TD>
-                    <p className="font-medium">{m.name}</p>
+                    <p className="flex flex-wrap items-center gap-1.5 font-medium">
+                      {m.name}
+                      <Badge
+                        tone={m.ownership === "external" ? "warn" : "accent"}
+                        className="px-1.5 py-0 text-[10px]"
+                      >
+                        {m.ownership === "external" ? "External" : "Internal"}
+                      </Badge>
+                    </p>
                     <p className="text-xs text-ink-3">
                       {m.machine_type}
                       {m.registration_no ? ` · ${m.registration_no}` : ""} ·{" "}
@@ -179,7 +214,7 @@ export function DailySheet({
                       <option value="breakdown">Broken down</option>
                       <option value="maintenance">Under maintenance</option>
                     </Select>
-                    {normal && (
+                    {normal && !m.meter_broken && (
                       <p className="mt-1 text-[11px] text-ink-3">
                         {m.current_reading != null
                           ? `carried forward: ${m.current_reading} ${unit}`
@@ -188,35 +223,58 @@ export function DailySheet({
                     )}
                   </TD>
                   <TD className="text-right">
-                    <Input
-                      type="number"
-                      step="0.1"
-                      min="0"
-                      value={r.reading}
-                      onChange={(e) => set(m.id, { reading: e.target.value })}
-                      placeholder={
-                        !normal
-                          ? "n/a"
-                          : m.current_reading != null
-                            ? String(m.current_reading)
-                            : undefined
-                      }
-                      disabled={!normal}
-                      className="w-28 text-right"
-                      aria-label={`${m.name} new reading`}
-                    />
+                    {m.meter_broken ? (
+                      <p className="text-xs font-medium text-danger">Meter broken</p>
+                    ) : (
+                      <Input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        value={r.reading}
+                        onChange={(e) => set(m.id, { reading: e.target.value })}
+                        placeholder={
+                          !normal
+                            ? "n/a"
+                            : m.current_reading != null
+                              ? String(m.current_reading)
+                              : undefined
+                        }
+                        disabled={!normal}
+                        className="w-28 text-right"
+                        aria-label={`${m.name} new reading`}
+                      />
+                    )}
                   </TD>
                   <TD className="text-right">
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={r.fuel}
-                      onChange={(e) => set(m.id, { fuel: e.target.value })}
-                      disabled={!normal}
-                      className="w-24 text-right"
-                      aria-label={`${m.name} fuel`}
-                    />
+                    {m.track_fuel ? (
+                      <div className="flex flex-col items-end gap-1">
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={r.fuel}
+                          onChange={(e) => set(m.id, { fuel: e.target.value })}
+                          disabled={!normal}
+                          className="w-24 text-right"
+                          aria-label={`${m.name} fuel`}
+                        />
+                        {shraddhaPump && normal && fuel > 0 && (
+                          <Select
+                            value={r.source}
+                            onChange={(e) =>
+                              set(m.id, { source: e.target.value as FuelSource })
+                            }
+                            className="w-28 text-xs"
+                            aria-label={`${m.name} fuel source`}
+                          >
+                            <option value="shraddha">Shraddha pump</option>
+                            <option value="outside">Outside pump</option>
+                          </Select>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-ink-3">no fuel</span>
+                    )}
                   </TD>
                   <TD className="pt-4 text-right tabular-nums text-ink-2">
                     {normal && fuel > 0 && price != null ? `₹${(fuel * price).toFixed(0)}` : "—"}

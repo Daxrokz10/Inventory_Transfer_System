@@ -1,49 +1,70 @@
 @import "tailwindcss";
 
 @theme inline {
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-plex-sans);
+  --font-mono: var(--font-plex-mono);
+  --font-display: var(--font-plex-condensed);
 }
 
 /* =============================================================
-   SGC Suite design tokens — modern industrial
-   Two modules share one shell; the accent swaps per module via
-   [data-theme="diesel"] so utilities like bg-accent re-color
-   automatically. Everything else (surfaces, ink, lines) is shared.
+   SGC Suite design tokens — "Control Panel" industrial system.
+
+   Two first-class themes:
+     • Daylight (light) — default, built for on-site tablets in sun
+     • Instrument (dark) — the signature; makes the schematic glow
+
+   Mode is carried on <html data-mode="light|dark">; absent that,
+   prefers-color-scheme decides. Module accent is a SEPARATE axis on
+   [data-theme="diesel"] (steel blue → diesel amber). The @theme block
+   holds the light defaults + generates utilities; the blocks after it
+   override the CSS variables at runtime for dark + per-module.
    ============================================================= */
 @theme {
-  /* Surfaces */
-  --color-page: #f3f3f1; /* concrete */
-  --color-surface: #ffffff;
-  --color-surface-2: #f8f8f7;
+  /* Surfaces — daylight */
+  --color-page: #eaebe7; /* cool concrete */
+  --color-surface: #fbfbfa;
+  --color-surface-2: #f1f2ef;
+  --color-inset: #f6f6f4;
 
   /* Ink */
-  --color-ink: #16181d;
-  --color-ink-2: #565b64;
-  --color-ink-3: #8a8f99;
+  --color-ink: #121619;
+  --color-ink-2: #4e555c;
+  --color-ink-3: #7c838b;
 
-  /* Hairlines */
-  --color-line: #e3e3df;
-  --color-line-strong: #cfcfc9;
+  /* Hairlines / seams */
+  --color-line: #dee0db;
+  --color-line-strong: #c7cac3;
 
-  /* Module accent — Inventory default (steel blue) */
-  --color-accent: #1c5cab;
-  --color-accent-strong: #164a8a;
-  --color-accent-soft: #e3edf9;
+  /* Module accent — Inventory default (steel / blueprint blue) */
+  --color-accent: #2e6fd6;
+  --color-accent-strong: #245bb0;
+  --color-accent-soft: #e4edfb;
 
-  /* Sidebar (graphite, shared by both modules) */
+  /* Sidebar (graphite instrument housing, shared by both modes) */
   --color-sidebar: #14171c;
   --color-sidebar-hover: #1f242c;
   --color-sidebar-ink: #e6e8ec;
   --color-sidebar-muted: #9aa0ab;
 
-  /* Status (text-safe on white) */
-  --color-good: #15803d;
-  --color-good-soft: #e8f5ec;
-  --color-warn: #b45309;
-  --color-warn-soft: #fdf3e3;
-  --color-danger: #b91c1c;
-  --color-danger-soft: #fdecec;
+  /* Status system — reserved signal colours (text-safe on surface) */
+  --color-good: #0a7a40;
+  --color-good-soft: #e4f4ea;
+  --color-warn: #85590a;
+  --color-warn-soft: #fbf1da;
+  --color-danger: #be2c1c;
+  --color-danger-soft: #fbeae7;
+  --color-pending: #0c6f86;
+  --color-pending-soft: #e1f3f7;
+
+  /* Signal LEDs — the bright lamp fills (paired with icon + label) */
+  --color-ok-led: #12a657;
+  --color-caution-led: #e4a800;
+  --color-alarm-led: #e23b2c;
+  --color-pending-led: #14a6c4;
+
+  /* Structural fills */
+  --color-hatch: rgba(124, 131, 139, 0.16); /* N/A exclusion */
+  --color-grid: rgba(46, 111, 214, 0.1); /* blueprint grid */
 
   /* Chart series (validated categorical palette, fixed order) */
   --color-chart-1: #2a78d6;
@@ -54,21 +75,107 @@
   --color-chart-6: #e34948;
 }
 
-/* Diesel module accent — safety amber. Applied by the AppShell wrapper. */
+/* ---- Module accent: Machinery / Diesel (safety amber), daylight ---- */
 [data-theme="diesel"] {
-  --color-accent: #b45309;
-  --color-accent-strong: #92400e;
-  --color-accent-soft: #fbf0e0;
+  --color-accent: #b96c0c;
+  --color-accent-strong: #985a0a;
+  --color-accent-soft: #fbefdd;
 }
 
-/* Internal tool — keep a consistent light theme regardless of OS preference. */
+/* ===================== INSTRUMENT (dark) =====================
+   Dark token overrides, applied under both the OS query and the explicit
+   toggle (literal blocks, so it stays portable plain CSS). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-mode="light"]) {
+    --color-page: #0f1317;
+    --color-surface: #171c22;
+    --color-surface-2: #1f262e;
+    --color-inset: #12161b;
+
+    --color-ink: #e9eef2;
+    --color-ink-2: #a2aeb8;
+    --color-ink-3: #66727c;
+
+    --color-line: #2a333b;
+    --color-line-strong: #3a454f;
+
+    --color-accent: #3b82e8;
+    --color-accent-strong: #5a97ee;
+    --color-accent-soft: rgba(59, 130, 232, 0.16);
+
+    --color-good: #3dd98a;
+    --color-good-soft: rgba(34, 195, 106, 0.14);
+    --color-warn: #f7d24e;
+    --color-warn-soft: rgba(245, 197, 24, 0.15);
+    --color-danger: #ff7a6e;
+    --color-danger-soft: rgba(240, 68, 56, 0.15);
+    --color-pending: #5bd6ec;
+    --color-pending-soft: rgba(37, 195, 222, 0.13);
+
+    --color-ok-led: #22c36a;
+    --color-caution-led: #f5c518;
+    --color-alarm-led: #f04438;
+    --color-pending-led: #25c3de;
+
+    --color-hatch: rgba(102, 114, 124, 0.18);
+    --color-grid: rgba(59, 130, 232, 0.1);
+  }
+  :root:not([data-mode="light"]) [data-theme="diesel"] {
+    --color-accent: #e8912a;
+    --color-accent-strong: #f2a548;
+    --color-accent-soft: rgba(232, 145, 42, 0.16);
+  }
+}
+
+/* Explicit dark toggle — must win over the OS query above. */
+[data-mode="dark"] {
+  --color-page: #0f1317;
+  --color-surface: #171c22;
+  --color-surface-2: #1f262e;
+  --color-inset: #12161b;
+
+  --color-ink: #e9eef2;
+  --color-ink-2: #a2aeb8;
+  --color-ink-3: #66727c;
+
+  --color-line: #2a333b;
+  --color-line-strong: #3a454f;
+
+  --color-accent: #3b82e8;
+  --color-accent-strong: #5a97ee;
+  --color-accent-soft: rgba(59, 130, 232, 0.16);
+
+  --color-good: #3dd98a;
+  --color-good-soft: rgba(34, 195, 106, 0.14);
+  --color-warn: #f7d24e;
+  --color-warn-soft: rgba(245, 197, 24, 0.15);
+  --color-danger: #ff7a6e;
+  --color-danger-soft: rgba(240, 68, 56, 0.15);
+  --color-pending: #5bd6ec;
+  --color-pending-soft: rgba(37, 195, 222, 0.13);
+
+  --color-ok-led: #22c36a;
+  --color-caution-led: #f5c518;
+  --color-alarm-led: #f04438;
+  --color-pending-led: #25c3de;
+
+  --color-hatch: rgba(102, 114, 124, 0.18);
+  --color-grid: rgba(59, 130, 232, 0.1);
+}
+[data-mode="dark"] [data-theme="diesel"] {
+  --color-accent: #e8912a;
+  --color-accent-strong: #f2a548;
+  --color-accent-soft: rgba(232, 145, 42, 0.16);
+}
+
+/* ---- base ---- */
 body {
   background: var(--color-page);
   color: var(--color-ink);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, Arial, sans-serif;
 }
 
-/* Native number spinners collide with right-aligned qty/rate values in narrow grid columns. */
+/* Native number spinners collide with right-aligned qty/rate values. */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
@@ -78,11 +185,82 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* Site visualization canvas (diesel module) — drag/pan states that don't
-   map to a single static Tailwind utility. */
+/* ---- signal LEDs — the bright lamp fills, paired with icon + label ---- */
+.led-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+.led-dot[data-tone="ok"] {
+  background: var(--color-ok-led);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ok-led) 20%, transparent);
+}
+.led-dot[data-tone="caution"] {
+  background: var(--color-caution-led);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-caution-led) 22%, transparent);
+}
+.led-dot[data-tone="alarm"] {
+  background: var(--color-alarm-led);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-alarm-led) 22%, transparent);
+}
+.led-dot[data-tone="pending"] {
+  background: var(--color-pending-led);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-pending-led) 22%, transparent);
+}
+.led-dot[data-tone="off"] {
+  background: var(--color-ink-3);
+  opacity: 0.55;
+}
+
+/* ---- state cell helpers (five-state table system) ---- */
+/* N/A — inert, hatched, "excluded by design". The eye skips it. */
+.cell-na {
+  color: var(--color-ink-3);
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--color-hatch) 0 6px,
+    transparent 6px 12px
+  );
+  border-radius: 5px;
+}
+/* Pending — an open slot awaiting data (applies, empty now). */
+.cell-pending {
+  color: var(--color-pending);
+  border: 1px dashed color-mix(in srgb, var(--color-pending-led) 60%, transparent);
+  background: color-mix(in srgb, var(--color-pending-led) 9%, transparent);
+  border-radius: 6px;
+}
+.cell-pending .led-dot {
+  animation: led-pulse 1.8s ease-in-out infinite;
+}
+@keyframes led-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cell-pending .led-dot {
+    animation: none;
+  }
+}
+
+/* Blueprint grid underlay (visualization canvas + schematic contexts). */
+.blueprint-grid {
+  background-image: linear-gradient(var(--color-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+/* ---- Site visualization canvas: drag/pan states ---- */
 .viz-node.is-moving {
   opacity: 0.85;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 .viz-machine.dragging {
   opacity: 0.4;
@@ -103,6 +281,7 @@ input[type="number"] {
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 600;
+  font-family: var(--font-mono);
   color: var(--color-ink);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }

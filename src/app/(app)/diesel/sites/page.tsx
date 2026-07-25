@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { INDIAN_STATES, cityForState } from "@/lib/diesel/types";
 import { SiteForm } from "./SiteForm";
-import { updateSiteState } from "./actions";
+import { updateSiteState, setShraddhaPump } from "./actions";
 
 export default async function SitesPage() {
   const supabase = await createClient();
@@ -20,7 +20,7 @@ export default async function SitesPage() {
   const [{ data: projects, error: projectsError }, { data: pricesRaw }] = await Promise.all([
     supabase
       .from("projects")
-      .select("id, code, name, branch, gstin, state")
+      .select("id, code, name, branch, gstin, state, shraddha_pump")
       .order("code"),
     supabase
       .from("fuel_prices")
@@ -79,6 +79,7 @@ export default async function SitesPage() {
                 <th className="py-2 pr-4">Branch</th>
                 <th className="py-2 pr-4">GSTIN</th>
                 <th className="py-2 pr-4">State (fuel prices)</th>
+                <th className="py-2 pr-4">Shraddha pump</th>
                 <th className="py-2 pr-4 text-right">Diesel ₹/L</th>
                 <th className="py-2 text-right">Petrol ₹/L</th>
               </tr>
@@ -86,7 +87,7 @@ export default async function SitesPage() {
             <tbody>
               {sites.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-3 text-ink-2">No sites yet.</td>
+                  <td colSpan={8} className="py-3 text-ink-2">No sites yet.</td>
                 </tr>
               ) : (
                 sites.map((p) => {
@@ -116,6 +117,25 @@ export default async function SitesPage() {
                             </option>
                           ))}
                         </select>
+                        <button
+                          type="submit"
+                          className="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-2 hover:bg-surface-2"
+                        >
+                          Save
+                        </button>
+                      </form>
+                    </td>
+                    <td className="py-2.5 pr-4">
+                      <form action={setShraddhaPump} className="flex items-center gap-1.5">
+                        <input type="hidden" name="project_id" value={p.id} />
+                        <label className="flex items-center gap-1.5 text-xs text-ink-2">
+                          <input
+                            type="checkbox"
+                            name="shraddha_pump"
+                            defaultChecked={p.shraddha_pump === true}
+                          />
+                          Shraddha
+                        </label>
                         <button
                           type="submit"
                           className="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-2 hover:bg-surface-2"

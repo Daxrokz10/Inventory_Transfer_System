@@ -3,10 +3,13 @@ import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
+import { NotMetered, StatusPill } from "@/components/ui/states";
+import { cn } from "@/lib/cn";
 import { soStatus, type Machine } from "@/lib/diesel/types";
 import { NewMachineButton } from "./MachineForm";
-import { MachineActions } from "./MachineActions";
+import { MachineActions, MeterBrokenControl } from "./MachineActions";
 import { MachineRequestButtons } from "./MachineRequestButtons";
+import { RemoveHiredMachineButton } from "./RemoveHiredMachineButton";
 import { MachinesToolbar } from "./MachinesToolbar";
 
 type GroupBy = "site" | "type";
@@ -36,7 +39,9 @@ export default async function MachinesPage({
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;
 
-  const [{ data: machinesRaw }, { data: projects }, { data: reqRaw }] =
+  const avgCutoff = new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10);
+
+  const [{ data: machinesRaw }, { data: projects }, { data: reqRaw }, { data: recentLogsRaw }] =
     await Promise.all([
       supabase.from("machines").select("*").order("name"),
       supabase
@@ -48,12 +53,39 @@ export default async function MachinesPage({
         .from("machine_requests")
         .select("machine_id, type")
         .eq("status", "pending"),
+      supabase
+        .from("daily_logs")
+        .select("machine_id, opening_reading, closing_reading, fuel_issued_liters")
+        .gt("fuel_issued_liters", 0)
+        .gte("log_date", avgCutoff),
     ]);
 
   const machines = (machinesRaw ?? []) as Machine[];
   const siteList = projects ?? [];
   const siteName = new Map(siteList.map((p) => [p.id, p.name]));
   const siteCode = new Map(siteList.map((p) => [p.id, p.code]));
+
+  // Current running average (last 90 days) per machine — km/L or L/hr,
+  // matching how the machine is metered.
+  type RecentLog = { machine_id: string; opening_reading: number | null; closing_reading: number | null; fuel_issued_liters: number };
+  const logsByMachine = new Map<string, RecentLog[]>();
+  for (const l of (recentLogsRaw ?? []) as RecentLog[]) {
+    (logsByMachine.get(l.machine_id) ?? logsByMachine.set(l.machine_id, []).get(l.machine_id)!).push(l);
+  }
+  const runningAvg = new Map<string, number>();
+  for (const m of machines) {
+    const rows = logsByMachine.get(m.id);
+    if (!rows || rows.length === 0) continue;
+    const vals: number[] = [];
+    for (const l of rows) {
+      if (l.opening_reading == null || l.closing_reading == null) continue;
+      const delta = Number(l.closing_reading) - Number(l.opening_reading);
+      const fuel = Number(l.fuel_issued_liters);
+      if (delta <= 0 || fuel <= 0) continue;
+      vals.push(m.reading_type === "hours" ? fuel / delta : delta / fuel);
+    }
+    if (vals.length > 0) runningAvg.set(m.id, vals.reduce((s, v) => s + v, 0) / vals.length);
+  }
   // machine_id → the type of its open request (if any).
   const pendingByMachine = new Map<string, "renewal" | "removal">(
     (reqRaw ?? []).map((r) => [r.machine_id, r.type as "renewal" | "removal"]),
@@ -88,9 +120,9 @@ export default async function MachinesPage({
   // When grouped by site, the Site column is redundant; likewise Type.
   const showSiteCol = isAdmin && groupBy !== "site";
   const showTypeCol = groupBy !== "type";
-  // 7 always-present columns: Machine, Numberplate, Fuel, Metered by,
-  // Current reading, Ownership, Actions — plus optional Site / Type.
-  const colCount = 7 + (showSiteCol ? 1 : 0) + (showTypeCol ? 1 : 0);
+  // 8 always-present columns: Machine, Numberplate, Fuel, Metered by,
+  // Current reading, Running avg, Ownership, Actions — plus optional Site / Type.
+  const colCount = 8 + (showSiteCol ? 1 : 0) + (showTypeCol ? 1 : 0);
 
   return (
     <div className="space-y-6">
@@ -129,6 +161,7 @@ export default async function MachinesPage({
               <TH>Fuel</TH>
               <TH>Metered by</TH>
               <TH className="text-right">Current reading</TH>
+              <TH className="text-right">Running avg</TH>
               <TH>Ownership</TH>
               <TH>Actions</TH>
             </tr>
@@ -160,6 +193,7 @@ export default async function MachinesPage({
                   showSiteCol={showSiteCol}
                   showTypeCol={showTypeCol}
                   colCount={colCount}
+                  runningAvg={runningAvg}
                 />
               ))
             )}
@@ -181,6 +215,7 @@ function GroupBlock({
   showSiteCol,
   showTypeCol,
   colCount,
+  runningAvg,
 }: {
   label: string;
   machines: Machine[];
@@ -192,6 +227,7 @@ function GroupBlock({
   showSiteCol: boolean;
   showTypeCol: boolean;
   colCount: number;
+  runningAvg: Map<string, number>;
 }) {
   return (
     <>
@@ -210,48 +246,80 @@ function GroupBlock({
         const unit = m.reading_type === "hours" ? "hr" : "km";
         const so = soStatus(m);
         return (
-          <TRow key={m.id} className={!m.is_active ? "opacity-55" : undefined}>
+          <TRow
+            key={m.id}
+            className={cn(
+              !m.is_active && "opacity-55",
+              so.state === "expired" && "shadow-[inset_3px_0_0_var(--color-alarm-led)]",
+              so.state === "soon" && "shadow-[inset_3px_0_0_var(--color-caution-led)]",
+            )}
+          >
             {showSiteCol && (
               <TD className="text-ink-2">
                 {siteCode.get(m.project_id) && (
-                  <span className="text-ink-3">{siteCode.get(m.project_id)} · </span>
+                  <span className="font-mono text-xs text-ink-3">
+                    {siteCode.get(m.project_id)} ·{" "}
+                  </span>
                 )}
                 {siteName.get(m.project_id) ?? "—"}
               </TD>
             )}
             <TD className="font-medium">
-              {m.name}
+              <a href={`/diesel/machines/${m.id}`} className="hover:underline">
+                {m.name}
+              </a>
               {!m.is_active && (
                 <Badge tone="neutral" className="ml-2">
                   Inactive
                 </Badge>
               )}
               {!m.track_fuel && (
-                <Badge tone="neutral" className="ml-2">
-                  No fuel tracking
-                </Badge>
+                <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
+                  asset
+                </span>
               )}
               {so.state === "expired" && (
-                <Badge tone="danger" className="ml-2">
+                <StatusPill tone="alarm" className="ml-2">
                   SO expired · {so.days}d over
-                </Badge>
+                </StatusPill>
               )}
               {so.state === "soon" && (
-                <Badge tone="warn" className="ml-2">
+                <StatusPill tone="caution" className="ml-2">
                   SO ends in {so.days}d
-                </Badge>
+                </StatusPill>
               )}
             </TD>
             {showTypeCol && <TD className="text-ink-2">{m.machine_type}</TD>}
-            <TD className="text-ink-2">{m.registration_no ?? "—"}</TD>
+            <TD className="font-mono text-xs text-ink-2">
+              {m.registration_no ?? <NotMetered label="no plate" />}
+            </TD>
             <TD className="capitalize text-ink-2">
-              {m.track_fuel ? m.fuel_type : "—"}
+              {m.track_fuel ? m.fuel_type : <NotMetered label="no fuel" />}
             </TD>
             <TD className="text-ink-2">
-              {m.reading_type === "hours" ? "Running hours" : "Odometer (km)"}
+              {!m.track_fuel ? (
+                <NotMetered label="—" />
+              ) : m.meter_broken ? (
+                <StatusPill tone="alarm">Meter broken</StatusPill>
+              ) : m.reading_type === "hours" ? (
+                "Running hours"
+              ) : (
+                "Odometer (km)"
+              )}
             </TD>
-            <TD className="text-right tabular-nums">
-              {m.current_reading != null ? `${m.current_reading} ${unit}` : "—"}
+            <TD className="text-right">
+              {m.current_reading != null ? (
+                <span className="font-mono tabular-nums">
+                  {m.current_reading} <span className="text-ink-3">{unit}</span>
+                </span>
+              ) : (
+                <NotMetered label="—" />
+              )}
+            </TD>
+            <TD className="text-right font-mono tabular-nums text-ink-2">
+              {m.track_fuel && runningAvg.has(m.id)
+                ? `${runningAvg.get(m.id)!.toFixed(2)} ${m.reading_type === "hours" ? "L/hr" : "km/L"}`
+                : <NotMetered label="—" />}
             </TD>
             <TD>
               {m.ownership === "external" ? (
@@ -263,22 +331,37 @@ function GroupBlock({
               )}
             </TD>
             <TD>
-              {isAdmin ? (
-                <MachineActions machine={m} isAdmin={isAdmin} sites={siteList} />
-              ) : pendingByMachine.get(m.id) ? (
-                <MachineRequestButtons
-                  machineId={m.id}
-                  ownership={m.ownership}
-                  pendingType={pendingByMachine.get(m.id)}
-                />
-              ) : so.state === "soon" || so.state === "expired" ? (
-                <MachineRequestButtons
-                  machineId={m.id}
-                  ownership={m.ownership}
-                />
-              ) : (
-                <span className="text-xs text-ink-3">—</span>
-              )}
+              <div className="flex items-center gap-3">
+                {isAdmin ? (
+                  <MachineActions machine={m} isAdmin={isAdmin} sites={siteList} />
+                ) : (
+                  (() => {
+                    const req =
+                      pendingByMachine.get(m.id) ||
+                      so.state === "soon" ||
+                      so.state === "expired";
+                    const canRemove = m.ownership === "external" && m.is_active;
+                    if (!req && !canRemove) {
+                      return <span className="text-xs text-ink-3">—</span>;
+                    }
+                    return (
+                      <div className="flex items-center gap-3">
+                        {req && (
+                          <MachineRequestButtons
+                            machineId={m.id}
+                            ownership={m.ownership}
+                            pendingType={pendingByMachine.get(m.id) ?? null}
+                          />
+                        )}
+                        {canRemove && (
+                          <RemoveHiredMachineButton machineId={m.id} machineName={m.name} />
+                        )}
+                      </div>
+                    );
+                  })()
+                )}
+                <MeterBrokenControl machine={m} isAdmin={isAdmin} />
+              </div>
             </TD>
           </TRow>
         );

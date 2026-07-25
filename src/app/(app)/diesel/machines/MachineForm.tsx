@@ -26,6 +26,7 @@ export function NewMachineButton({
   );
   const [readingType, setReadingType] = useState<"km" | "hours">("km");
   const [trackFuel, setTrackFuel] = useState(true);
+  const [trackMeter, setTrackMeter] = useState(true);
   const [error, formAction, pending] = useActionState(addMachine, null);
 
   if (!open) {
@@ -128,7 +129,7 @@ export function NewMachineButton({
               <option value="petrol">Petrol</option>
             </Select>
           </Field>
-          {trackFuel && (
+          {(trackFuel || trackMeter) && (
             <Field
               label={readingType === "hours" ? "Starting reading (hours)" : "Starting reading (km)"}
               hint={
@@ -163,13 +164,31 @@ export function NewMachineButton({
             type="checkbox"
             name="track_fuel"
             checked={trackFuel}
-            onChange={(e) => setTrackFuel(e.target.checked)}
+            onChange={(e) => {
+              setTrackFuel(e.target.checked);
+              if (e.target.checked) setTrackMeter(true);
+            }}
           />
           Track this machine&apos;s fuel on the daily report
           <span className="text-ink-3">
             (uncheck for electric/no-engine items and office vehicles)
           </span>
         </label>
+
+        {!trackFuel && (
+          <label className="flex items-center gap-2 text-sm text-ink-2">
+            <input
+              type="checkbox"
+              name="track_meter"
+              checked={trackMeter}
+              onChange={(e) => setTrackMeter(e.target.checked)}
+            />
+            Still ask for a reading (hours/km) on the daily report
+            <span className="text-ink-3">
+              (e.g. batching plants — no fuel to track, but hours matter for maintenance)
+            </span>
+          </label>
+        )}
 
         <SoDurationField />
 

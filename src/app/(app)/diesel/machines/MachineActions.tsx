@@ -5,6 +5,7 @@ import {
   deactivateMachine,
   deleteMachine,
   reactivateMachine,
+  setMeterBroken,
   transferMachine,
 } from "./actions";
 import { Input } from "@/components/ui/Field";
@@ -173,6 +174,65 @@ function TransferPicker({
         className="inline-flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-strong disabled:opacity-50"
       >
         Move to {selected ? selected.name : "…"}
+      </button>
+    </form>
+  );
+}
+
+// Lets a site supervisor flag their own site's machine as having a broken
+// meter — a one-way switch from their side. Once flagged, only an admin
+// can clear it (the confirm text makes that irreversibility explicit for
+// the person setting it).
+export function MeterBrokenControl({
+  machine,
+  isAdmin,
+}: {
+  machine: Machine;
+  isAdmin: boolean;
+}) {
+  if (!machine.track_fuel) return null;
+
+  if (!machine.meter_broken) {
+    return (
+      <form
+        action={setMeterBroken}
+        onSubmit={(e) => {
+          if (
+            !window.confirm(
+              `Flag ${machine.name}'s meter as broken? Daily reports will stop asking for a reading until an admin clears this.`,
+            )
+          ) {
+            e.preventDefault();
+          }
+        }}
+      >
+        <input type="hidden" name="machine_id" value={machine.id} />
+        <input type="hidden" name="broken" value="true" />
+        <button
+          type="submit"
+          className="text-xs text-ink-3 underline decoration-dotted underline-offset-2 hover:text-ink"
+        >
+          Flag meter broken
+        </button>
+      </form>
+    );
+  }
+
+  if (!isAdmin) return null;
+
+  return (
+    <form
+      action={setMeterBroken}
+      onSubmit={(e) => {
+        if (!window.confirm(`Clear the broken-meter flag on ${machine.name}?`)) {
+          e.preventDefault();
+        }
+      }}
+    >
+      <input type="hidden" name="machine_id" value={machine.id} />
+      <input type="hidden" name="broken" value="false" />
+      <button type="submit" className="text-xs text-ink-3 underline hover:text-ink">
+        Clear meter-broken
       </button>
     </form>
   );

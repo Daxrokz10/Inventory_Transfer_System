@@ -17,6 +17,8 @@ interface SheetRow {
   /** "breakdown"/"maintenance" days skip the reading/fuel requirement —
       the machine simply wasn't in normal use. */
   status: "normal" | "breakdown" | "maintenance";
+  /** Where fuel was filled; only meaningful at Shraddha-pump sites. */
+  fuel_source?: "shraddha" | "outside" | null;
 }
 
 // Save the daily sheet for one or more machines. Exactly one report per
@@ -77,8 +79,16 @@ export async function saveDailySheet(
   if (machines.some((m) => m.project_id !== projectId)) {
     return "All machines on one sheet must belong to the same site.";
   }
-  if (machines.some((m) => !m.track_fuel)) {
-    return "One of these machines isn't set up for fuel tracking.";
+  if (machines.some((m) => !m.track_meter && !m.track_fuel)) {
+    return "One of these machines isn't set up for the daily report.";
+  }
+  // A machine with fuel tracking off must not carry fuel through — it may
+  // still be here purely for its reading (e.g. a batching plant's hours).
+  for (const r of rows) {
+    const m = machineById.get(r.machine_id)!;
+    if (!m.track_fuel && r.fuel_issued_liters > 0) {
+      return `${m.name} isn't set up for fuel tracking.`;
+    }
   }
 
   const admin = createAdminClient();
@@ -115,10 +125,13 @@ export async function saveDailySheet(
   // city, cache → scrape → stale).
   const { data: project } = await admin
     .from("projects")
-    .select("state")
+    .select("state, shraddha_pump")
     .eq("id", projectId)
     .single();
   const prices = await getPricesForCity(cityForState(project?.state ?? null), log_date);
+  // Source is only meaningful at Shraddha-pump sites — enforce server-side
+  // so a stale/forged client can't stamp a source on a non-Shraddha site.
+  const isShraddhaPump = project?.shraddha_pump === true;
 
   const inserts = rows.map((r) => {
     const m = machineById.get(r.machine_id)!;
@@ -141,6 +154,13 @@ export async function saveDailySheet(
           : null,
       remarks: (r.remarks ?? "").trim() || null,
       status: r.status,
+      // Source only applies at Shraddha-pump sites, and only with fuel.
+      fuel_source:
+        isShraddhaPump && fuel_issued_liters > 0
+          ? r.fuel_source === "outside"
+            ? "outside"
+            : "shraddha"
+          : null,
       entered_by: user.id,
     };
   });
@@ -183,6 +203,83 @@ export async function saveDailySheet(
 
   revalidatePath("/diesel");
   return null;
+}
+
+// Record a barrel / diesel delivery arriving on site. RLS scopes this to the
+// caller's own site (or admin). Barrels come at market price, so the rate
+// defaults to the day's API diesel price for the site's state unless a
+// manual "rate paid" is given. Shaped for useActionState.
+export async function addFuelReceipt(
+  _prev: string | null,
+  formData: FormData,
+): Promise<string | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const project_id = String(formData.get("project_id") ?? "").trim();
+  const receipt_date = String(formData.get("receipt_date") ?? "").trim();
+  const liters = Number(formData.get("liters"));
+  const barrelsRaw = String(formData.get("barrels") ?? "").trim();
+  const rateRaw = String(formData.get("rate_per_liter") ?? "").trim();
+  const vendor = String(formData.get("vendor") ?? "").trim() || null;
+  const note = String(formData.get("note") ?? "").trim() || null;
+
+  if (!project_id) return "Missing site.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receipt_date)) return "Pick a valid date.";
+  if (receipt_date > new Date().toISOString().slice(0, 10)) {
+    return "The receipt date cannot be in the future.";
+  }
+  if (!(liters > 0)) return "Enter how many liters were received.";
+
+  // Rate: manual override if given, else the day's API market rate for the
+  // site's state. total_cost only when a rate is known.
+  let rate: number | null = rateRaw !== "" ? Number(rateRaw) : null;
+  if (rate == null || !(rate > 0)) {
+    const { data: project } = await supabase
+      .from("projects")
+      .select("state")
+      .eq("id", project_id)
+      .single();
+    const prices = await getPricesForCity(cityForState(project?.state ?? null), receipt_date);
+    rate = prices.diesel;
+  }
+  const total_cost = rate != null ? Number((rate * liters).toFixed(2)) : null;
+
+  const { error } = await supabase.from("fuel_receipts").insert({
+    project_id,
+    receipt_date,
+    liters,
+    barrels: barrelsRaw !== "" ? Number(barrelsRaw) : null,
+    rate_per_liter: rate,
+    total_cost,
+    vendor,
+    note,
+    created_by: user.id,
+  });
+  if (error) return error.message;
+
+  revalidatePath("/diesel");
+  revalidatePath("/diesel/reports");
+  return null;
+}
+
+// Remove a diesel-received entry (own site or admin, per RLS).
+export async function deleteFuelReceipt(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const id = String(formData.get("receipt_id") ?? "").trim();
+  if (!id) return;
+
+  await supabase.from("fuel_receipts").delete().eq("id", id);
+  revalidatePath("/diesel");
+  revalidatePath("/diesel/reports");
 }
 
 // Admin-only by RLS: mark an anomaly flag as resolved.

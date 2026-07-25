@@ -18,6 +18,7 @@ export function EditMachineForm({
 }) {
   const [ownership, setOwnership] = useState(machine.ownership);
   const [trackFuel, setTrackFuel] = useState(machine.track_fuel);
+  const [trackMeter, setTrackMeter] = useState(machine.track_meter);
   const [readingType, setReadingType] = useState(machine.reading_type);
   const [error, formAction, pending] = useActionState(
     async (prev: string | null, fd: FormData) => {
@@ -86,7 +87,7 @@ export function EditMachineForm({
             <Input name="vendor_name" required defaultValue={machine.vendor_name ?? ""} />
           </Field>
         )}
-        {trackFuel && (
+        {(trackFuel || trackMeter) && (
           <Field
             label={readingType === "hours" ? "Current reading (hours)" : "Current reading (km)"}
             hint="Leave blank to keep the current value"
@@ -107,10 +108,25 @@ export function EditMachineForm({
           type="checkbox"
           name="track_fuel"
           checked={trackFuel}
-          onChange={(e) => setTrackFuel(e.target.checked)}
+          onChange={(e) => {
+            setTrackFuel(e.target.checked);
+            if (e.target.checked) setTrackMeter(true);
+          }}
         />
         Track this machine&apos;s fuel on the daily report
       </label>
+
+      {!trackFuel && (
+        <label className="flex items-center gap-2 text-sm text-ink-2">
+          <input
+            type="checkbox"
+            name="track_meter"
+            checked={trackMeter}
+            onChange={(e) => setTrackMeter(e.target.checked)}
+          />
+          Still ask for a reading (hours/km) on the daily report
+        </label>
+      )}
 
       <SoDurationField defaultUntil={machine.so_until} />
 

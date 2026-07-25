@@ -33,6 +33,7 @@ export async function addMachine(
   const capacityRaw = get("tank_capacity_liters");
   const readingRaw = get("current_reading");
   const track_fuel = formData.get("track_fuel") != null;
+  const track_meter = track_fuel || formData.get("track_meter") != null;
   const so_until = get("so_until"); // YYYY-MM-DD or null
 
   if (!project_id || !name || !machine_type) {
@@ -55,8 +56,8 @@ export async function addMachine(
   if (ownership === "external" && !vendor_name) {
     return "Vendor name is required for external (hired) machines.";
   }
-  // Starting reading only matters when fuel/meter is tracked.
-  if (track_fuel && (readingRaw == null || Number(readingRaw) < 0)) {
+  // Starting reading only matters when a reading is tracked at all.
+  if (track_meter && (readingRaw == null || Number(readingRaw) < 0)) {
     return "A starting reading is required — this is the only time it's typed in manually.";
   }
 
@@ -71,8 +72,9 @@ export async function addMachine(
     vendor_name: ownership === "external" ? vendor_name : null,
     tank_capacity_liters: capacityRaw == null ? null : Number(capacityRaw),
     track_fuel,
-    current_reading: track_fuel ? Number(readingRaw) : null,
-    current_reading_at: track_fuel ? new Date().toISOString() : null,
+    track_meter,
+    current_reading: track_meter ? Number(readingRaw) : null,
+    current_reading_at: track_meter ? new Date().toISOString() : null,
     deployed_at: new Date().toISOString().slice(0, 10),
     so_until,
     created_by: user.id,
@@ -142,6 +144,7 @@ export async function updateMachine(
   const vendor_name = get("vendor_name");
   const registration_no = get("registration_no");
   const track_fuel = formData.get("track_fuel") != null;
+  const track_meter = track_fuel || formData.get("track_meter") != null;
   const readingRaw = get("current_reading");
   const so_until = get("so_until"); // YYYY-MM-DD, or null to clear
 
@@ -170,15 +173,16 @@ export async function updateMachine(
     vendor_name: ownership === "external" ? vendor_name : null,
     registration_no,
     track_fuel,
+    track_meter,
     so_until, // null clears the deadline
   };
   // Only overwrite the current reading when a value is supplied, so an
   // edit that leaves it blank doesn't wipe the carried-forward meter.
-  if (track_fuel && readingRaw != null && Number(readingRaw) >= 0) {
+  if (track_meter && readingRaw != null && Number(readingRaw) >= 0) {
     updates.current_reading = Number(readingRaw);
     updates.current_reading_at = new Date().toISOString();
   }
-  if (!track_fuel) {
+  if (!track_meter) {
     updates.current_reading = null;
     updates.current_reading_at = null;
   }
@@ -357,6 +361,46 @@ export async function resolveMachineRequest(formData: FormData): Promise<void> {
       resolution_note,
     })
     .eq("id", request_id);
+
+  revalidatePath("/diesel/machines");
+  revalidatePath("/diesel");
+}
+
+// Site person (or admin) retires a hired (external) machine when the hire
+// ends. Deactivates it — keeps its diesel history — and the DB function
+// enforces external-only + own-site, so this is safe even if called directly.
+export async function removeHiredMachine(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const machine_id = String(formData.get("machine_id") ?? "");
+  if (!machine_id) return;
+
+  await supabase.rpc("remove_hired_machine", { p_machine_id: machine_id });
+
+  revalidatePath("/diesel/machines");
+  revalidatePath("/diesel");
+}
+
+// Flag or clear a machine's broken-meter status. A supervisor can only set
+// it (true) for their own site's machine; clearing it (false) is
+// admin-only. Both rules are enforced in the set_meter_broken() DB
+// function, not just here, so this is defense in depth.
+export async function setMeterBroken(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const machine_id = String(formData.get("machine_id") ?? "");
+  const broken = formData.get("broken") === "true";
+  if (!machine_id) return;
+
+  await supabase.rpc("set_meter_broken", { p_machine_id: machine_id, p_broken: broken });
 
   revalidatePath("/diesel/machines");
   revalidatePath("/diesel");

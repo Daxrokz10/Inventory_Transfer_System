@@ -143,12 +143,28 @@ export async function computeAnomaliesForLog(
   }
 
   if (fuel > 0 && log.closing_reading == null) {
-    flags.push({
-      log_id: log.id,
-      type: "missing_reading",
-      severity: "low",
-      message: `${fuel}L issued but no closing reading was recorded.`,
-    });
+    // A machine flagged meter-broken can't produce a reading by design —
+    // that's expected, not an oversight, but it also means none of the
+    // reading-based checks below (no-movement, efficiency, decline) can
+    // run for this fill. Surface it as its own type, at medium severity,
+    // so someone actually eyeballs whether the fuel amount is reasonable
+    // in place of the automatic cross-check — this will keep recurring
+    // every fuel day until the meter is fixed and an admin clears it.
+    if (machine.meter_broken) {
+      flags.push({
+        log_id: log.id,
+        type: "meter_broken_unverified",
+        severity: "medium",
+        message: `${fuel}L issued while this machine's meter is flagged broken — no reading to cross-check against, so review this fill manually.`,
+      });
+    } else {
+      flags.push({
+        log_id: log.id,
+        type: "missing_reading",
+        severity: "low",
+        message: `${fuel}L issued but no closing reading was recorded.`,
+      });
+    }
   }
 
   if (

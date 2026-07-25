@@ -9,6 +9,7 @@ import {
   navFor,
   type ModuleKey,
 } from "@/lib/nav";
+import { ThemeToggle } from "./ThemeToggle";
 
 /* One shell, two tools. The module switcher at the top of the sidebar flips
    between Inventory (steel blue) and Diesel (safety amber); data-theme on the
@@ -38,7 +39,7 @@ export function AppShell({
       <aside className="sticky top-0 flex h-screen w-64 flex-col bg-sidebar px-3 py-4 text-sidebar-ink">
         {/* Brand */}
         <div className="mb-4 px-2">
-          <p className="text-sm font-bold uppercase tracking-[0.14em]">
+          <p className="font-display text-base font-bold uppercase tracking-[0.16em]">
             SGC <span className="text-sidebar-muted">Suite</span>
           </p>
           <p className="mt-0.5 text-[11px] text-sidebar-muted">
@@ -57,9 +58,7 @@ export function AppShell({
                 className={cn(
                   "rounded-md px-2 py-1.5 text-center text-xs font-semibold transition-colors",
                   active
-                    ? key === "diesel"
-                      ? "bg-[#b45309] text-white"
-                      : "bg-[#1c5cab] text-white"
+                    ? "bg-accent text-white"
                     : "text-sidebar-muted hover:text-sidebar-ink",
                 )}
               >
@@ -104,7 +103,10 @@ export function AppShell({
         </nav>
 
         {/* User footer */}
-        <div className="mt-4 border-t border-white/10 px-2 pt-4 text-xs">
+        <div className="mt-4 border-t border-white/10 px-2 pt-3 text-xs">
+          <div className="-mx-2 mb-1">
+            <ThemeToggle />
+          </div>
           <p className="truncate font-medium text-sidebar-ink">{fullName}</p>
           <p className="text-sidebar-muted">{roleLabel}</p>
           <form action="/auth/signout" method="post" className="mt-2">
