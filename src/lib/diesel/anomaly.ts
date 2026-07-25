@@ -126,6 +126,21 @@ export async function computeAnomaliesForLog(
   log: DailyLog,
 ): Promise<NewAnomalyFlag[]> {
   const flags: NewAnomalyFlag[] = [];
+
+  // A breakdown/maintenance report is itself worth surfacing to the admin —
+  // the machine is down, not just a fuel-data oddity. High severity for a
+  // breakdown (unplanned, urgent); medium for planned maintenance.
+  if (log.status !== "normal") {
+    flags.push({
+      log_id: log.id,
+      type: log.status,
+      severity: log.status === "breakdown" ? "high" : "medium",
+      message: `${machine.name} reported ${
+        log.status === "breakdown" ? "broken down" : "under maintenance"
+      } on ${log.log_date}${log.remarks ? ` — ${log.remarks}` : ""}.`,
+    });
+  }
+
   const unit = machine.reading_type === "hours" ? "L/hr" : "km/L";
   const fuel = Number(log.fuel_issued_liters);
   const delta =
