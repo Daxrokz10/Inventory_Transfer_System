@@ -4,7 +4,7 @@ import { Card, CardLabel } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Input, Select } from "@/components/ui/Field";
+import { Select } from "@/components/ui/Field";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import type { DailyLog, Machine, FuelReceipt } from "@/lib/diesel/types";
 import { getPricesForCity } from "@/lib/diesel/fuelPrice";
@@ -264,7 +264,11 @@ export default async function DieselPage({
 }) {
   const sp = await searchParams;
   const today = new Date().toISOString().slice(0, 10);
-  const date = /^\d{4}-\d{2}-\d{2}$/.test(sp.date ?? "") ? sp.date! : today;
+  // Supervisors can only ever file today's report — no date picker, no
+  // backdating. A missed day's fuel gets folded into today's entry instead
+  // (see the gap nudge below), which also sidesteps the fuel-price API
+  // only ever having a live rate for "today."
+  const date = today;
 
   const supabase = await createClient();
   const {
@@ -366,35 +370,55 @@ export default async function DieselPage({
   if (!isAdmin) {
     const machineIds = machines.map((m) => m.id);
 
-    const [{ data: existingRaw }, prices, { data: flagsRaw }, { data: receiptsRaw }] = await Promise.all([
-      machineIds.length
-        ? supabase
-            .from("daily_logs")
-            .select("*")
-            .eq("log_date", date)
-            .in("machine_id", machineIds)
-        : Promise.resolve({ data: [] }),
-      getPricesForCity(siteCity, date),
-      supabase
-        .from("anomaly_flags")
-        .select("id, severity, message, created_at, daily_logs!inner(machine_id, log_date, project_id)")
-        .eq("resolved", false)
-        .order("created_at", { ascending: false })
-        .limit(10),
-      homeProjectId
-        ? supabase
-            .from("fuel_receipts")
-            .select("*")
-            .eq("project_id", homeProjectId)
-            .order("receipt_date", { ascending: false })
-            .limit(10)
-        : Promise.resolve({ data: [] }),
-    ]);
+    const gapLookback = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+
+    const [{ data: existingRaw }, prices, { data: flagsRaw }, { data: receiptsRaw }, { data: recentLogsRaw }] =
+      await Promise.all([
+        machineIds.length
+          ? supabase
+              .from("daily_logs")
+              .select("*")
+              .eq("log_date", date)
+              .in("machine_id", machineIds)
+          : Promise.resolve({ data: [] }),
+        getPricesForCity(siteCity, date),
+        supabase
+          .from("anomaly_flags")
+          .select("id, severity, message, created_at, daily_logs!inner(machine_id, log_date, project_id)")
+          .eq("resolved", false)
+          .order("created_at", { ascending: false })
+          .limit(10),
+        homeProjectId
+          ? supabase
+              .from("fuel_receipts")
+              .select("*")
+              .eq("project_id", homeProjectId)
+              .order("receipt_date", { ascending: false })
+              .limit(10)
+          : Promise.resolve({ data: [] }),
+        // Each machine's most recent report before today, to flag a gap in
+        // reporting — the site person adds the missed days' fuel into
+        // today's entry rather than filing a separate backdated report.
+        machineIds.length
+          ? supabase
+              .from("daily_logs")
+              .select("machine_id, log_date")
+              .in("machine_id", machineIds)
+              .gte("log_date", gapLookback)
+              .lt("log_date", today)
+              .order("log_date", { ascending: false })
+          : Promise.resolve({ data: [] }),
+      ]);
     const receipts = (receiptsRaw ?? []) as FuelReceipt[];
 
     const existing: Record<string, DailyLog> = {};
     for (const log of (existingRaw ?? []) as DailyLog[]) {
       existing[log.machine_id] = log;
+    }
+
+    const lastReportedByMachine: Record<string, string> = {};
+    for (const l of (recentLogsRaw ?? []) as { machine_id: string; log_date: string }[]) {
+      if (!(l.machine_id in lastReportedByMachine)) lastReportedByMachine[l.machine_id] = l.log_date;
     }
 
     const machineById = new Map(machines.map((m) => [m.id, m]));
@@ -404,15 +428,7 @@ export default async function DieselPage({
       <div className="space-y-6">
         <PageHeader
           title="Daily Diesel Report"
-          subtitle={`${site?.name ?? "Your site"} — every machine, every day`}
-          actions={
-            <form className="flex items-center gap-2">
-              <Input type="date" name="date" defaultValue={date} max={today} />
-              <Button type="submit" variant="secondary" size="sm">
-                Open
-              </Button>
-            </form>
-          }
+          subtitle={`${site?.name ?? "Your site"} — ${new Date(today).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}`}
         />
 
         <PriceBanner
@@ -437,6 +453,7 @@ export default async function DieselPage({
           dieselPrice={prices.diesel}
           petrolPrice={prices.petrol}
           shraddhaPump={site?.shraddha_pump ?? false}
+          lastReportedByMachine={lastReportedByMachine}
         />
 
         <Card className="p-0">

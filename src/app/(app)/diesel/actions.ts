@@ -23,10 +23,10 @@ interface SheetRow {
   fuel_source?: "on_site" | "shraddha" | "outside" | null;
 }
 
-// Save the daily sheet for one or more machines. Exactly one report per
-// machine per day: a machine that already has a log for this date is
-// skipped entirely (locked) — resubmitting isn't allowed, whether that's
-// today or any past day. Tomorrow is a fresh, unlocked day as normal,
+// Save the daily sheet for one or more machines. Only today's date is
+// accepted — no backdating. Exactly one report per machine per day: a
+// machine that already has a log for today is skipped entirely (locked) —
+// resubmitting isn't allowed. Tomorrow is a fresh, unlocked day as normal,
 // carrying forward from whatever was saved today.
 // Shaped for useActionState: returns an error string, or null on success.
 export async function saveDailySheet(
@@ -40,9 +40,12 @@ export async function saveDailySheet(
   if (!user) redirect("/login");
 
   const log_date = String(formData.get("log_date") ?? "");
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(log_date)) return "Pick a valid date.";
-  if (log_date > new Date().toISOString().slice(0, 10)) {
-    return "The report date cannot be in the future.";
+  const today = new Date().toISOString().slice(0, 10);
+  // Only today's report can be filed — no backdating. A site that missed a
+  // day doesn't get a separate entry for it; the gap's fuel is added into
+  // today's entry instead (surfaced as a nudge in the sheet UI).
+  if (log_date !== today) {
+    return "You can only submit today's report — a missed day's fuel gets added into today's entry instead.";
   }
 
   let rows: SheetRow[] = [];

@@ -27,6 +27,14 @@ const STATUS_LABEL: Record<Status, string> = {
   maintenance: "Under maintenance",
 };
 
+// Full days between a machine's last report and today, not counting today
+// itself — 1 means it reported yesterday (no gap), 2+ means at least one
+// day was skipped in between.
+function daysSince(lastDate: string, today: string): number {
+  const ms = Date.parse(today) - Date.parse(lastDate);
+  return Math.round(ms / 86_400_000);
+}
+
 type FuelSource = "on_site" | "shraddha" | "outside";
 
 interface RowState {
@@ -44,6 +52,7 @@ export function DailySheet({
   dieselPrice,
   petrolPrice,
   shraddhaPump = false,
+  lastReportedByMachine = {},
 }: {
   machines: Machine[];
   existing: Record<string, DailyLog>;
@@ -54,6 +63,10 @@ export function DailySheet({
       changes the source picker's options (Shraddha pump / Outside pump)
       instead of the default (On site / Offsite) shown everywhere else. */
   shraddhaPump?: boolean;
+  /** Each machine's most recent report date before today (if any), used to
+      nudge the site person to fold a missed day's fuel into today's entry
+      instead of leaving it unaccounted for — only today can be filed. */
+  lastReportedByMachine?: Record<string, string>;
 }) {
   const editable = useMemo(
     () => machines.filter((m) => !existing[m.id]),
@@ -193,6 +206,8 @@ export function DailySheet({
               const r = rows[m.id];
               const fuel = Number(r?.fuel) || 0;
               const normal = r.status === "normal";
+              const lastDate = lastReportedByMachine[m.id];
+              const gapDays = lastDate ? daysSince(lastDate, logDate) - 1 : 0;
 
               return (
                 <TRow key={m.id} className="align-top">
@@ -228,6 +243,12 @@ export function DailySheet({
                         {m.current_reading != null
                           ? `carried forward: ${m.current_reading} ${unit}`
                           : "no reading yet"}
+                      </p>
+                    )}
+                    {gapDays >= 1 && (
+                      <p className="mt-1 max-w-40 text-[11px] font-medium text-warn">
+                        Not reported for {gapDays} day{gapDays === 1 ? "" : "s"} (last:{" "}
+                        {lastDate}) — add the missed days&apos; fuel into today&apos;s figure.
                       </p>
                     )}
                   </TD>
