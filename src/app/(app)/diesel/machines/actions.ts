@@ -56,9 +56,12 @@ export async function addMachine(
   if (ownership === "external" && !vendor_name) {
     return "Vendor name is required for external (hired) machines.";
   }
-  // Starting reading only matters when a reading is tracked at all.
-  if (track_meter && (readingRaw == null || Number(readingRaw) < 0)) {
-    return "A starting reading is required — this is the only time it's typed in manually.";
+  // Starting reading only matters when a reading is tracked at all. Must be
+  // a real, positive reading — a placeholder 0 here is what makes a
+  // machine's first daily report compute an impossible efficiency (its
+  // entire life-to-date distance divided into one day's fuel).
+  if (track_meter && (readingRaw == null || Number(readingRaw) <= 0)) {
+    return "A real starting reading is required (not 0) — this is the only time it's typed in manually, and every day after carries it forward automatically.";
   }
 
   const { error } = await supabase.from("machines").insert({

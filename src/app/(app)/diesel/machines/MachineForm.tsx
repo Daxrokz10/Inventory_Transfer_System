@@ -142,9 +142,8 @@ export function NewMachineButton({
                 name="current_reading"
                 type="number"
                 step="0.1"
-                min="0"
+                min="0.1"
                 required
-                defaultValue="0"
                 placeholder={readingType === "hours" ? "e.g. 4500 hours" : "e.g. 32000 km"}
               />
             </Field>

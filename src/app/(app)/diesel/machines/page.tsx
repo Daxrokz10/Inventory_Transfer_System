@@ -42,12 +42,20 @@ export default async function MachinesPage({
 
   const avgCutoff = new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10);
 
+  // Removed (deactivated) machines drop off this list entirely — their
+  // diesel history still lives on in the Register/Reports, which query
+  // daily_logs directly and don't filter on is_active. A supervisor stays
+  // scoped to their own site's roster here even though RLS also grants
+  // them read access to a group's shared internal machines — that shared
+  // visibility is deliberately limited to the Daily Report page; adding,
+  // editing, removing, and transferring a machine stays tied to whichever
+  // site actually owns it.
+  const machinesQuery = supabase.from("machines").select("*").eq("is_active", true).order("name");
+  if (!isAdmin && homeProjectId) machinesQuery.eq("project_id", homeProjectId);
+
   const [{ data: machinesRaw }, { data: projects }, { data: reqRaw }, { data: recentLogsRaw }] =
     await Promise.all([
-      // Removed (deactivated) machines drop off this list entirely — their
-      // diesel history still lives on in the Register/Reports, which query
-      // daily_logs directly and don't filter on is_active.
-      supabase.from("machines").select("*").eq("is_active", true).order("name"),
+      machinesQuery,
       supabase
         .from("projects")
         .select("id, name, code")

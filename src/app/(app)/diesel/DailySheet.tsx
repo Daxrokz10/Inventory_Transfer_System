@@ -53,6 +53,8 @@ export function DailySheet({
   petrolPrice,
   shraddhaPump = false,
   lastReportedByMachine = {},
+  homeProjectId = null,
+  siteLabelById = {},
 }: {
   machines: Machine[];
   existing: Record<string, DailyLog>;
@@ -67,6 +69,11 @@ export function DailySheet({
       nudge the site person to fold a missed day's fuel into today's entry
       instead of leaving it unaccounted for — only today can be filed. */
   lastReportedByMachine?: Record<string, string>;
+  /** The caller's own site — a machine whose project_id differs from this
+      belongs to another site in the same group (shared internal fleet),
+      shown here to make that visible rather than silently mixed in. */
+  homeProjectId?: string | null;
+  siteLabelById?: Record<string, string>;
 }) {
   const editable = useMemo(
     () => machines.filter((m) => !existing[m.id]),
@@ -166,6 +173,11 @@ export function DailySheet({
                         >
                           {m.ownership === "external" ? "External" : "Internal"}
                         </Badge>
+                        {homeProjectId && m.project_id !== homeProjectId && (
+                          <Badge tone="neutral" className="px-1.5 py-0 text-[10px]">
+                            from {siteLabelById[m.project_id] ?? "another site"}
+                          </Badge>
+                        )}
                       </p>
                       <p className="text-xs text-ink-3">
                         {m.machine_type}
@@ -220,6 +232,11 @@ export function DailySheet({
                       >
                         {m.ownership === "external" ? "External" : "Internal"}
                       </Badge>
+                      {homeProjectId && m.project_id !== homeProjectId && (
+                        <Badge tone="neutral" className="px-1.5 py-0 text-[10px]">
+                          from {siteLabelById[m.project_id] ?? "another site"}
+                        </Badge>
+                      )}
                     </p>
                     <p className="text-xs text-ink-3">
                       {m.machine_type}

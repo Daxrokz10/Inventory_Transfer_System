@@ -90,3 +90,48 @@ export async function setShraddhaPump(formData: FormData): Promise<void> {
   revalidatePath("/diesel/sites");
   revalidatePath("/diesel");
 }
+
+// Create a site group — sites whose INTERNAL machinery moves freely
+// between them. Membership itself is set per-site via setSiteGroup below.
+export async function createSiteGroup(
+  _prev: string | null,
+  formData: FormData,
+): Promise<string | null> {
+  const supabase = await requireAdmin();
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return "Group name is required.";
+
+  const { error } = await supabase.from("site_groups").insert({ name });
+  if (error) return error.message;
+
+  revalidatePath("/diesel/sites");
+  return null;
+}
+
+// Assign (or clear) which group a site belongs to. A site can only ever
+// be in one group at a time.
+export async function setSiteGroup(formData: FormData): Promise<void> {
+  const supabase = await requireAdmin();
+  const id = String(formData.get("project_id") ?? "");
+  const group_id = String(formData.get("group_id") ?? "").trim() || null;
+  if (!id) return;
+
+  await supabase.from("projects").update({ group_id }).eq("id", id);
+
+  revalidatePath("/diesel/sites");
+  revalidatePath("/diesel");
+  revalidatePath("/diesel/machines");
+}
+
+// Delete a group entirely — its member sites just become ungrouped
+// (project_id.group_id is set null on delete, per the FK), nothing about
+// their machines/logs is touched.
+export async function deleteSiteGroup(formData: FormData): Promise<void> {
+  const supabase = await requireAdmin();
+  const id = String(formData.get("group_id") ?? "");
+  if (!id) return;
+
+  await supabase.from("site_groups").delete().eq("id", id);
+
+  revalidatePath("/diesel/sites");
+}

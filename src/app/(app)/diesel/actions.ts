@@ -69,8 +69,12 @@ export async function saveDailySheet(
     return "Nothing to save — fill in at least one machine.";
   }
 
-  // Machines are RLS-scoped, so a supervisor only ever resolves their own
-  // site's machines here.
+  // Machines are RLS-scoped: a caller only ever resolves their own site's
+  // machines here, PLUS any internal machine belonging to another site in
+  // their group (shared fleet) — external machines never leave their own
+  // site, so that grant never applies to them. A row referencing anything
+  // else simply doesn't come back here, which is what this length check
+  // catches.
   const { data: machinesRaw } = await supabase
     .from("machines")
     .select("*")
@@ -80,9 +84,19 @@ export async function saveDailySheet(
   if (machines.length !== rows.length) {
     return "One of the machines could not be found at your site.";
   }
-  const projectId = machines[0].project_id;
-  if (machines.some((m) => m.project_id !== projectId)) {
-    return "All machines on one sheet must belong to the same site.";
+
+  // The log is always attributed to the FILER's own home site, never the
+  // machine's — a shared internal machine might be sitting at a different
+  // group site today, but whichever site's barrel stock actually supplied
+  // the fuel is what the register/monthly report need to see debited.
+  const { data: callerProfile } = await supabase
+    .from("profiles")
+    .select("home_project_id")
+    .eq("id", user.id)
+    .single();
+  const projectId = callerProfile?.home_project_id;
+  if (!projectId) {
+    return "Your account isn't assigned to a site yet.";
   }
   if (machines.some((m) => !m.track_meter && !m.track_fuel)) {
     return "One of these machines isn't set up for the daily report.";

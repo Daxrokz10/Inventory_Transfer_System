@@ -310,7 +310,12 @@ export default async function DieselPage({
     .eq("is_active", true)
     .or("track_fuel.eq.true,track_meter.eq.true")
     .order("name");
-  if (siteFilter) machinesQuery.eq("project_id", siteFilter);
+  // Admin narrows to one chosen site via the dropdown. A supervisor gets
+  // no explicit filter here — RLS naturally returns their own site's
+  // machines plus any INTERNAL machine belonging to another site in their
+  // group (a shared fleet); external machines never leave their own site,
+  // so they're unaffected either way.
+  if (isAdmin && siteFilter) machinesQuery.eq("project_id", siteFilter);
 
   const [{ data: machinesRaw }, projectsRes, siteRes] = await Promise.all([
     machinesQuery,
@@ -424,6 +429,20 @@ export default async function DieselPage({
     const machineById = new Map(machines.map((m) => [m.id, m]));
     const flags = flagsRaw ?? [];
 
+    // Label for any machine's home site that isn't this caller's own —
+    // only relevant once a shared internal machine from another group
+    // site shows up on this sheet.
+    const otherSiteIds = [...new Set(machines.map((m) => m.project_id))].filter(
+      (id) => id !== homeProjectId,
+    );
+    const { data: otherSitesRaw } = otherSiteIds.length
+      ? await supabase.from("projects").select("id, name, code").in("id", otherSiteIds)
+      : { data: [] };
+    const siteLabelById: Record<string, string> = {};
+    for (const p of (otherSitesRaw ?? []) as { id: string; name: string; code: string | null }[]) {
+      siteLabelById[p.id] = p.code ? `${p.code} · ${p.name}` : p.name;
+    }
+
     return (
       <div className="space-y-6">
         <PageHeader
@@ -454,6 +473,8 @@ export default async function DieselPage({
           petrolPrice={prices.petrol}
           shraddhaPump={site?.shraddha_pump ?? false}
           lastReportedByMachine={lastReportedByMachine}
+          homeProjectId={homeProjectId}
+          siteLabelById={siteLabelById}
         />
 
         <Card className="p-0">
