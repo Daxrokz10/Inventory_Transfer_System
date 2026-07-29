@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { StatusPill, NotMetered } from "@/components/ui/states";
 import { soStatus, type Machine, type DailyLog, type AnomalyFlag } from "@/lib/diesel/types";
+import { dayMetric } from "@/lib/diesel/efficiency";
 import { EfficiencyChart, type EfficiencyPoint } from "../../EfficiencyChart";
 
 const inr = (n: number) =>
@@ -20,14 +21,6 @@ const SEVERITY_TONE: Record<string, "neutral" | "warn" | "danger"> = {
   medium: "warn",
   high: "danger",
 };
-
-function dayMetric(machine: Machine, log: DailyLog): number | null {
-  if (log.opening_reading == null || log.closing_reading == null) return null;
-  const delta = Number(log.closing_reading) - Number(log.opening_reading);
-  const fuel = Number(log.fuel_issued_liters);
-  if (delta <= 0 || fuel <= 0) return null;
-  return machine.reading_type === "hours" ? fuel / delta : delta / fuel;
-}
 
 export default async function MachineDetailPage({
   params,

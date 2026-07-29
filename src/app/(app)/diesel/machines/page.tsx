@@ -6,6 +6,7 @@ import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { NotMetered, StatusPill } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
 import { soStatus, type Machine } from "@/lib/diesel/types";
+import { dayMetric } from "@/lib/diesel/efficiency";
 import { NewMachineButton } from "./MachineForm";
 import { MachineActions, MeterBrokenControl } from "./MachineActions";
 import { MachineRequestButtons } from "./MachineRequestButtons";
@@ -43,7 +44,10 @@ export default async function MachinesPage({
 
   const [{ data: machinesRaw }, { data: projects }, { data: reqRaw }, { data: recentLogsRaw }] =
     await Promise.all([
-      supabase.from("machines").select("*").order("name"),
+      // Removed (deactivated) machines drop off this list entirely — their
+      // diesel history still lives on in the Register/Reports, which query
+      // daily_logs directly and don't filter on is_active.
+      supabase.from("machines").select("*").eq("is_active", true).order("name"),
       supabase
         .from("projects")
         .select("id, name, code")
@@ -78,11 +82,8 @@ export default async function MachinesPage({
     if (!rows || rows.length === 0) continue;
     const vals: number[] = [];
     for (const l of rows) {
-      if (l.opening_reading == null || l.closing_reading == null) continue;
-      const delta = Number(l.closing_reading) - Number(l.opening_reading);
-      const fuel = Number(l.fuel_issued_liters);
-      if (delta <= 0 || fuel <= 0) continue;
-      vals.push(m.reading_type === "hours" ? fuel / delta : delta / fuel);
+      const value = dayMetric(m, l);
+      if (value != null) vals.push(value);
     }
     if (vals.length > 0) runningAvg.set(m.id, vals.reduce((s, v) => s + v, 0) / vals.length);
   }
@@ -249,7 +250,6 @@ function GroupBlock({
           <TRow
             key={m.id}
             className={cn(
-              !m.is_active && "opacity-55",
               so.state === "expired" && "shadow-[inset_3px_0_0_var(--color-alarm-led)]",
               so.state === "soon" && "shadow-[inset_3px_0_0_var(--color-caution-led)]",
             )}
@@ -268,11 +268,6 @@ function GroupBlock({
               <a href={`/diesel/machines/${m.id}`} className="hover:underline">
                 {m.name}
               </a>
-              {!m.is_active && (
-                <Badge tone="neutral" className="ml-2">
-                  Inactive
-                </Badge>
-              )}
               {!m.track_fuel && (
                 <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
                   asset

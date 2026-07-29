@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/Field";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import type { DailyLog, Machine, FuelReceipt } from "@/lib/diesel/types";
 import { getPricesForCity } from "@/lib/diesel/fuelPrice";
+import { dayMetric } from "@/lib/diesel/efficiency";
 import { cityForState, soStatus } from "@/lib/diesel/types";
 import { DailySheet } from "./DailySheet";
 import { FuelReceiptForm } from "./FuelReceiptForm";
@@ -37,15 +38,14 @@ function efficiencyPoints(
   const points: EfficiencyPoint[] = [];
   for (const log of logs) {
     const m = byId.get(log.machine_id);
-    if (!m || log.opening_reading == null || log.closing_reading == null) continue;
-    const delta = Number(log.closing_reading) - Number(log.opening_reading);
-    const fuel = Number(log.fuel_issued_liters);
-    if (delta <= 0 || fuel <= 0) continue;
+    if (!m) continue;
+    const value = dayMetric(m, log);
+    if (value == null) continue;
     points.push({
       machine_id: m.id,
       machine_label: m.name,
       entry_date: log.log_date,
-      value: m.reading_type === "hours" ? fuel / delta : delta / fuel,
+      value,
       unit: m.reading_type === "hours" ? "L/hr" : "km/L",
     });
   }

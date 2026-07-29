@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DailyLog, Machine } from "./types";
+import { computeDayMetric, dayMetric } from "./efficiency";
 
 /* Rule-based anomaly detection on DAILY logs.
 
@@ -43,14 +44,6 @@ export interface NewAnomalyFlag {
   type: string;
   severity: "low" | "medium" | "high";
   message: string;
-}
-
-function dayMetric(machine: Machine, log: DailyLog): number | null {
-  if (log.opening_reading == null || log.closing_reading == null) return null;
-  const delta = Number(log.closing_reading) - Number(log.opening_reading);
-  const fuel = Number(log.fuel_issued_liters);
-  if (delta <= 0 || fuel <= 0) return null;
-  return machine.reading_type === "hours" ? fuel / delta : delta / fuel;
 }
 
 function shiftDate(dateStr: string, days: number): string {
@@ -194,9 +187,23 @@ export async function computeAnomaliesForLog(
     });
   }
 
+  // An absolute sanity ceiling/floor, independent of any rolling average —
+  // this is what catches a machine's very first-ever entry, which has no
+  // prior history to compare against and would otherwise sail through the
+  // deviation check below with zero prior data points.
+  const rawMetric = computeDayMetric(machine, log);
+  if (rawMetric != null && !rawMetric.plausible) {
+    flags.push({
+      log_id: log.id,
+      type: "implausible_efficiency",
+      severity: "high",
+      message: `Today works out to ${rawMetric.value.toFixed(2)} ${rawMetric.unit}, which isn't physically plausible — likely this machine's first entry using its registered starting reading instead of a real previous close, or a reading typo. Check the opening/closing readings.`,
+    });
+  }
+
   // Efficiency deviation vs this machine's own recent average — this is
   // also what surfaces an unusually large overnight/off-hours jump.
-  const current = dayMetric(machine, log);
+  const current = rawMetric?.plausible ? rawMetric.value : null;
   if (current != null) {
     const { data: prior } = await admin
       .from("daily_logs")
