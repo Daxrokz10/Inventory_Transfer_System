@@ -120,7 +120,11 @@ export function AppShell({
         </div>
       </aside>
 
-      <main className="flex-1 p-8">{children}</main>
+      {/* min-w-0 is load-bearing: without it, a flex item won't shrink
+          below its content's intrinsic width, so one wide table anywhere
+          on the page would force this whole row (sidebar included) to
+          grow instead of just scrolling internally. */}
+      <main className="min-w-0 flex-1 overflow-x-hidden p-8">{children}</main>
     </div>
   );
 }

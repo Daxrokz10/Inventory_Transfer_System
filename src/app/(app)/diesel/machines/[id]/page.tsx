@@ -227,7 +227,7 @@ export default async function MachineDetailPage({
         )}
       </Card>
 
-      <Card className="p-0">
+      <Card className="overflow-x-auto p-0">
         <h2 className="px-5 pt-4 text-sm font-semibold">
           Breakdowns &amp; maintenance history
         </h2>
