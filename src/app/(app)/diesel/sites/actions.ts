@@ -108,6 +108,22 @@ export async function createSiteGroup(
   return null;
 }
 
+// Toggle whether a group also shares EXTERNAL (hired) machines between
+// its sites — off by default, since most groups (e.g. a physically
+// moving internal fleet) deliberately keep hired machines put.
+export async function setGroupShareExternal(formData: FormData): Promise<void> {
+  const supabase = await requireAdmin();
+  const id = String(formData.get("group_id") ?? "");
+  const on = formData.get("share_external") === "on";
+  if (!id) return;
+
+  await supabase.from("site_groups").update({ share_external: on }).eq("id", id);
+
+  revalidatePath("/diesel/sites");
+  revalidatePath("/diesel");
+  revalidatePath("/diesel/machines");
+}
+
 // Assign (or clear) which group a site belongs to. A site can only ever
 // be in one group at a time.
 export async function setSiteGroup(formData: FormData): Promise<void> {

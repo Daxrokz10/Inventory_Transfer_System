@@ -2,7 +2,12 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { INDIAN_STATES, cityForState } from "@/lib/diesel/types";
 import { SiteForm } from "./SiteForm";
-import { updateSiteState, setShraddhaPump, deleteSiteGroup } from "./actions";
+import {
+  updateSiteState,
+  setShraddhaPump,
+  deleteSiteGroup,
+  setGroupShareExternal,
+} from "./actions";
 import { GroupForm } from "./GroupForm";
 import { SiteGroupSelect } from "./SiteGroupSelect";
 
@@ -30,7 +35,7 @@ export default async function SitesPage() {
         .select("location, fuel_type, price, price_date")
         .order("price_date", { ascending: false })
         .limit(400),
-      supabase.from("site_groups").select("id, name").order("name"),
+      supabase.from("site_groups").select("id, name, share_external").order("name"),
     ]);
   const siteGroups = groups ?? [];
 
@@ -97,12 +102,31 @@ export default async function SitesPage() {
                       {memberCount} site{memberCount === 1 ? "" : "s"}
                     </span>
                   </span>
-                  <form action={deleteSiteGroup}>
-                    <input type="hidden" name="group_id" value={g.id} />
-                    <button type="submit" className="text-xs text-ink-3 hover:text-danger">
-                      Delete
-                    </button>
-                  </form>
+                  <div className="flex items-center gap-4">
+                    <form action={setGroupShareExternal} className="flex items-center gap-1.5">
+                      <input type="hidden" name="group_id" value={g.id} />
+                      <label className="flex items-center gap-1.5 text-xs text-ink-2">
+                        <input
+                          type="checkbox"
+                          name="share_external"
+                          defaultChecked={g.share_external === true}
+                        />
+                        Also share external (hired) machines
+                      </label>
+                      <button
+                        type="submit"
+                        className="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-2 hover:bg-surface-2"
+                      >
+                        Save
+                      </button>
+                    </form>
+                    <form action={deleteSiteGroup}>
+                      <input type="hidden" name="group_id" value={g.id} />
+                      <button type="submit" className="text-xs text-ink-3 hover:text-danger">
+                        Delete
+                      </button>
+                    </form>
+                  </div>
                 </li>
               );
             })}

@@ -12,10 +12,16 @@ import { SoDurationField } from "./SoDurationField";
 export function NewMachineButton({
   sites,
   homeProjectId,
+  addableSites = [],
   isAdmin,
 }: {
   sites: { id: string; name: string }[];
   homeProjectId: string | null;
+  /** Other sites a non-admin may also register an external machine at —
+      only non-empty when their site's group has opted into sharing
+      external machines. Includes their own site too, for a uniform
+      picker. */
+  addableSites?: { id: string; name: string; code: string | null }[];
   isAdmin: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -87,6 +93,16 @@ export function NewMachineButton({
                 {sites.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : addableSites.length > 1 ? (
+            <Field label="Site" hint="Your site's group shares hired machinery">
+              <Select name="project_id" required defaultValue={homeProjectId ?? ""}>
+                {addableSites.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.code ? `${s.code} · ${s.name}` : s.name}
                   </option>
                 ))}
               </Select>

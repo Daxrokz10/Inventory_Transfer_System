@@ -40,18 +40,42 @@ export default async function MachinesPage({
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;
 
+  // Extra sites a non-admin may register a NEW external machine at,
+  // beyond their own — only populated when their site's group has opted
+  // into sharing external machines (most groups haven't, e.g. Dahej).
+  let addableSites: { id: string; name: string; code: string | null }[] = [];
+  if (!isAdmin && homeProjectId) {
+    const { data: myProject } = await supabase
+      .from("projects")
+      .select("group_id")
+      .eq("id", homeProjectId)
+      .single();
+    if (myProject?.group_id) {
+      const { data: group } = await supabase
+        .from("site_groups")
+        .select("share_external")
+        .eq("id", myProject.group_id)
+        .single();
+      if (group?.share_external) {
+        const { data: groupSites } = await supabase
+          .from("projects")
+          .select("id, name, code")
+          .eq("group_id", myProject.group_id)
+          .order("code");
+        addableSites = groupSites ?? [];
+      }
+    }
+  }
+
   const avgCutoff = new Date(Date.now() - 90 * 86400_000).toISOString().slice(0, 10);
 
   // Removed (deactivated) machines drop off this list entirely — their
   // diesel history still lives on in the Register/Reports, which query
-  // daily_logs directly and don't filter on is_active. A supervisor stays
-  // scoped to their own site's roster here even though RLS also grants
-  // them read access to a group's shared internal machines — that shared
-  // visibility is deliberately limited to the Daily Report page; adding,
-  // editing, removing, and transferring a machine stays tied to whichever
-  // site actually owns it.
+  // daily_logs directly and don't filter on is_active. No explicit site
+  // filter here — RLS already scopes this to a supervisor's own site plus
+  // whatever their group additionally grants (a shared internal fleet
+  // always; shared external machines too when the group has opted in).
   const machinesQuery = supabase.from("machines").select("*").eq("is_active", true).order("name");
-  if (!isAdmin && homeProjectId) machinesQuery.eq("project_id", homeProjectId);
 
   const [{ data: machinesRaw }, { data: projects }, { data: reqRaw }, { data: recentLogsRaw }] =
     await Promise.all([
@@ -149,6 +173,7 @@ export default async function MachinesPage({
           <NewMachineButton
             sites={siteList}
             homeProjectId={homeProjectId}
+            addableSites={addableSites}
             isAdmin={isAdmin}
           />
         )}
@@ -198,6 +223,7 @@ export default async function MachinesPage({
                   siteCode={siteCode}
                   siteList={siteList}
                   isAdmin={isAdmin}
+                  homeProjectId={homeProjectId}
                   pendingByMachine={pendingByMachine}
                   showSiteCol={showSiteCol}
                   showTypeCol={showTypeCol}
@@ -220,6 +246,7 @@ function GroupBlock({
   siteCode,
   siteList,
   isAdmin,
+  homeProjectId,
   pendingByMachine,
   showSiteCol,
   showTypeCol,
@@ -232,6 +259,7 @@ function GroupBlock({
   siteCode: Map<string, string | null>;
   siteList: { id: string; name: string; code: string | null }[];
   isAdmin: boolean;
+  homeProjectId: string | null;
   pendingByMachine: Map<string, "renewal" | "removal">;
   showSiteCol: boolean;
   showTypeCol: boolean;
@@ -339,10 +367,18 @@ function GroupBlock({
                   <MachineActions machine={m} isAdmin={isAdmin} sites={siteList} />
                 ) : (
                   (() => {
+                    // SO renewal/removal requests stay tied to the
+                    // machine's own site — a group grants shared
+                    // visibility/fill-and-register reach, not the
+                    // ability to file an SO request for a machine that
+                    // isn't actually yours (machine_requests RLS is
+                    // still strictly own-site-or-admin).
+                    const ownSite = m.project_id === homeProjectId;
                     const req =
-                      pendingByMachine.get(m.id) ||
-                      so.state === "soon" ||
-                      so.state === "expired";
+                      ownSite &&
+                      (pendingByMachine.get(m.id) ||
+                        so.state === "soon" ||
+                        so.state === "expired");
                     const canRemove = m.ownership === "external" && m.is_active;
                     if (!req && !canRemove) {
                       return <span className="text-xs text-ink-3">—</span>;
