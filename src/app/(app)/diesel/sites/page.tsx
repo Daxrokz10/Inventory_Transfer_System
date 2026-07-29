@@ -2,8 +2,9 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { INDIAN_STATES, cityForState } from "@/lib/diesel/types";
 import { SiteForm } from "./SiteForm";
-import { updateSiteState, setShraddhaPump, setSiteGroup, deleteSiteGroup } from "./actions";
+import { updateSiteState, setShraddhaPump, deleteSiteGroup } from "./actions";
 import { GroupForm } from "./GroupForm";
+import { SiteGroupSelect } from "./SiteGroupSelect";
 
 export default async function SitesPage() {
   const supabase = await createClient();
@@ -187,27 +188,7 @@ export default async function SitesPage() {
                       </form>
                     </td>
                     <td className="py-2.5 pr-4">
-                      <form action={setSiteGroup} className="flex items-center gap-1.5">
-                        <input type="hidden" name="project_id" value={p.id} />
-                        <select
-                          name="group_id"
-                          defaultValue={p.group_id ?? ""}
-                          className="rounded-md border border-line-strong bg-surface px-2 py-1 text-xs"
-                        >
-                          <option value="">Ungrouped</option>
-                          {siteGroups.map((g) => (
-                            <option key={g.id} value={g.id}>
-                              {g.name}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="submit"
-                          className="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-2 hover:bg-surface-2"
-                        >
-                          Save
-                        </button>
-                      </form>
+                      <SiteGroupSelect projectId={p.id} groupId={p.group_id} groups={siteGroups} />
                     </td>
                     <td className="py-2.5 pr-4 text-right tabular-nums text-ink">
                       {diesel ? diesel.price.toFixed(2) : <span className="text-ink-3">—</span>}
