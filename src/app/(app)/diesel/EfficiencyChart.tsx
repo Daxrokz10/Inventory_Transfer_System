@@ -29,6 +29,10 @@ export interface EfficiencyPoint {
   entry_date: string;
   value: number;
   unit: "km/L" | "L/hr";
+  /** True for a still-open fill (no later fill yet to close it out) — an
+      estimate using the machine's current reading, that will firm up as
+      more distance/hours accumulate before the next fill. */
+  provisional?: boolean;
 }
 
 export function EfficiencyChart({ points }: { points: EfficiencyPoint[] }) {

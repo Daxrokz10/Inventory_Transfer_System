@@ -1,44 +1,85 @@
 import type { DailyLog, Machine } from "./types";
 
-/* A day's efficiency — km/L for odometer-tracked machines, L/hr for
-   hour-meter ones. An implausible result (an astronomical km/L, or an
-   L/hr near zero) almost always means "opening" wasn't really the
-   previous day's close — the classic case is a machine's very first-ever
-   entry, where opening is just whatever was typed in at registration and
-   closing reflects its entire life-to-date distance, compressed into one
-   day's fuel. There's no way to recover a true daily figure from that,
-   so it's excluded from display and from every rolling average, rather
-   than shown or averaged as if it were real. */
-
 export const MAX_KM_PER_L = 50;
 export const MIN_L_PER_HR = 1;
 
 type MetricInput = Pick<Machine, "reading_type">;
-type LogInput = Pick<DailyLog, "opening_reading" | "closing_reading" | "fuel_issued_liters">;
+type FillLogInput = Pick<
+  DailyLog,
+  "id" | "log_date" | "opening_reading" | "closing_reading" | "fuel_issued_liters"
+>;
 
-export interface DayMetric {
+export interface FillMetric {
+  log_id: string;
+  log_date: string;
   value: number;
   unit: "km/L" | "L/hr";
   plausible: boolean;
+  /** True only for the most recent fill, when there's no later fill yet
+      to close out how far it actually went — an estimate using the
+      machine's current reading, which will firm up (and may change) once
+      the next fill happens. */
+  provisional: boolean;
 }
 
-export function computeDayMetric(machine: MetricInput, log: LogInput): DayMetric | null {
-  if (log.opening_reading == null || log.closing_reading == null) return null;
-  const delta = Number(log.closing_reading) - Number(log.opening_reading);
-  const fuel = Number(log.fuel_issued_liters);
-  if (delta <= 0 || fuel <= 0) return null;
+/**
+ * Attributes each fill's fuel to the FULL distance/hours it actually
+ * covered — from its own opening reading through the reading right
+ * before the NEXT fill — instead of just that single calendar day's
+ * movement.
+ *
+ * Fuel doesn't get consumed the instant it's dispensed: a tank topped up
+ * today might run the machine for another three or four days before the
+ * next fill. The old per-day math blamed all of today's fuel on today's
+ * movement alone (making a fill-day always look artificially inefficient)
+ * while the days it actually powered — no new fuel entered — contributed
+ * nothing at all, since they were excluded outright. Pairing each fill
+ * with the reading at its NEXT fill fixes this without needing day-by-day
+ * accounting: readings are just a running total, so "next fill's opening
+ * reading" already equals "whatever the reading was right before that
+ * fill," across however many (or few) days sit in between.
+ *
+ * `logs` only needs to contain this machine's fuel-days
+ * (fuel_issued_liters > 0) — order doesn't matter, this sorts them.
+ * Pass `currentReading` (the machine's live current_reading) to also get
+ * a provisional estimate for the most recent, still-open fill — e.g. for
+ * display. Omit it to get only fully-resolved (closed) fills — e.g. for
+ * anomaly checks, which shouldn't judge a fill before it's actually done.
+ */
+export function computeFillMetrics(
+  machine: MetricInput,
+  logs: FillLogInput[],
+  currentReading?: number | null,
+): FillMetric[] {
+  const fillDays = logs
+    .filter((l) => Number(l.fuel_issued_liters) > 0 && l.opening_reading != null)
+    .sort((a, b) => (a.log_date < b.log_date ? -1 : a.log_date > b.log_date ? 1 : 0));
 
   const isHours = machine.reading_type === "hours";
-  const value = isHours ? fuel / delta : delta / fuel;
-  const unit: "km/L" | "L/hr" = isHours ? "L/hr" : "km/L";
-  const plausible = isHours ? value >= MIN_L_PER_HR : value <= MAX_KM_PER_L;
-  return { value, unit, plausible };
-}
+  const results: FillMetric[] = [];
 
-/** The plausibility-filtered value — null for both "can't compute" and
-    "computed but not believable". What every display/averaging call site
-    should use. */
-export function dayMetric(machine: MetricInput, log: LogInput): number | null {
-  const m = computeDayMetric(machine, log);
-  return m && m.plausible ? m.value : null;
+  for (let i = 0; i < fillDays.length; i++) {
+    const fill = fillDays[i];
+    const next = fillDays[i + 1];
+    const endReading = next ? next.opening_reading : (currentReading ?? null);
+    if (endReading == null) continue;
+
+    const distance = Number(endReading) - Number(fill.opening_reading);
+    const fuel = Number(fill.fuel_issued_liters);
+    if (distance <= 0 || fuel <= 0) continue;
+
+    const value = isHours ? fuel / distance : distance / fuel;
+    const unit: "km/L" | "L/hr" = isHours ? "L/hr" : "km/L";
+    const plausible = isHours ? value >= MIN_L_PER_HR : value <= MAX_KM_PER_L;
+    results.push({
+      log_id: fill.id,
+      log_date: fill.log_date,
+      value,
+      unit,
+      plausible,
+      provisional: !next,
+    });
+  }
+
+  return results;
 }

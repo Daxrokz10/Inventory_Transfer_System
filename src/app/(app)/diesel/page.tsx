@@ -8,7 +8,7 @@ import { Select } from "@/components/ui/Field";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import type { DailyLog, Machine, FuelReceipt } from "@/lib/diesel/types";
 import { getPricesForCity } from "@/lib/diesel/fuelPrice";
-import { dayMetric } from "@/lib/diesel/efficiency";
+import { computeFillMetrics } from "@/lib/diesel/efficiency";
 import { cityForState, soStatus } from "@/lib/diesel/types";
 import { DailySheet } from "./DailySheet";
 import { FuelReceiptForm } from "./FuelReceiptForm";
@@ -30,24 +30,37 @@ const SEVERITY_TONE: Record<string, BadgeTone> = {
   high: "danger",
 };
 
+// Each fill's fuel is attributed to the full distance/hours it covered
+// through the NEXT fill (see efficiency.ts) — a tank topped up today
+// might run the machine for several more days, so this measures the
+// whole stretch it powered, not just today's own movement. The most
+// recent fill (no next one yet) still gets a point, marked provisional,
+// using the machine's current reading as a running "so far" estimate.
 function efficiencyPoints(
   machines: Machine[],
   logs: DailyLog[],
 ): EfficiencyPoint[] {
-  const byId = new Map(machines.map((m) => [m.id, m]));
-  const points: EfficiencyPoint[] = [];
+  const logsByMachine = new Map<string, DailyLog[]>();
   for (const log of logs) {
-    const m = byId.get(log.machine_id);
-    if (!m) continue;
-    const value = dayMetric(m, log);
-    if (value == null) continue;
-    points.push({
-      machine_id: m.id,
-      machine_label: m.name,
-      entry_date: log.log_date,
-      value,
-      unit: m.reading_type === "hours" ? "L/hr" : "km/L",
-    });
+    (logsByMachine.get(log.machine_id) ?? logsByMachine.set(log.machine_id, []).get(log.machine_id)!).push(
+      log,
+    );
+  }
+  const points: EfficiencyPoint[] = [];
+  for (const m of machines) {
+    const machineLogs = logsByMachine.get(m.id);
+    if (!machineLogs) continue;
+    for (const fm of computeFillMetrics(m, machineLogs, m.current_reading)) {
+      if (!fm.plausible) continue;
+      points.push({
+        machine_id: m.id,
+        machine_label: m.name,
+        entry_date: fm.log_date,
+        value: fm.value,
+        unit: fm.unit,
+        provisional: fm.provisional,
+      });
+    }
   }
   return points;
 }
@@ -584,6 +597,20 @@ export default async function DieselPage({
   const flags = flagsRaw ?? [];
   const machineById = new Map(machines.map((m) => [m.id, m]));
 
+  // A log can reference a machine that's since been deactivated (removed
+  // by a site person) — the log itself is still real history and must
+  // keep showing its machine's name/type, not just a blank dash.
+  const missingMachineIds = [
+    ...new Set(logs.map((l) => l.machine_id).filter((id) => !machineById.has(id))),
+  ];
+  if (missingMachineIds.length) {
+    const { data: inactiveMachines } = await supabase
+      .from("machines")
+      .select("*")
+      .in("id", missingMachineIds);
+    for (const m of (inactiveMachines ?? []) as Machine[]) machineById.set(m.id, m);
+  }
+
   const chartMachines = sp.machine
     ? machines.filter((m) => m.id === sp.machine)
     : machines;
@@ -594,12 +621,15 @@ export default async function DieselPage({
   // Per-row mileage (this day's own km/L or L/hr) and each machine's
   // current running average, both keyed off the same fetched logs —
   // machine_id + date is unique because of the one-report-per-day rule.
-  const allPoints = efficiencyPoints(machines, logs);
+  // Uses every machine referenced by these logs (including deactivated
+  // ones) so a removed machine's history still shows its mileage.
+  const allMachines = [...machineById.values()];
+  const allPoints = efficiencyPoints(allMachines, logs);
   const rowMetric = new Map(
     allPoints.map((p) => [`${p.machine_id}|${p.entry_date}`, p]),
   );
   const runningAvgByMachine = new Map<string, { value: number; unit: string }>();
-  for (const m of machines) {
+  for (const m of allMachines) {
     const vals = allPoints.filter((p) => p.machine_id === m.id);
     if (vals.length === 0) continue;
     const avg = vals.reduce((s, p) => s + p.value, 0) / vals.length;
@@ -862,7 +892,18 @@ function DailyLogsBySite({
                       )}
                     </TD>
                     <TD className="text-right font-mono tabular-nums text-ink-2">
-                      {metric ? `${metric.value.toFixed(2)} ${metric.unit}` : "—"}
+                      {metric ? (
+                        <>
+                          {metric.value.toFixed(2)} {metric.unit}
+                          {metric.provisional && (
+                            <span className="ml-1 text-[10px] text-ink-3" title="No later fill yet to close this one out — estimate using the current reading">
+                              so far
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </TD>
                     <TD className="text-right font-mono tabular-nums text-ink-2">
                       {avg ? `${avg.value.toFixed(2)} ${avg.unit}` : "—"}

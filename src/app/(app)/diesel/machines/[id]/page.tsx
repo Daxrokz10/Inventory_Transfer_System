@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { StatusPill, NotMetered } from "@/components/ui/states";
 import { soStatus, type Machine, type DailyLog, type AnomalyFlag } from "@/lib/diesel/types";
-import { dayMetric } from "@/lib/diesel/efficiency";
+import { computeFillMetrics } from "@/lib/diesel/efficiency";
 import { EfficiencyChart, type EfficiencyPoint } from "../../EfficiencyChart";
 
 const inr = (n: number) =>
@@ -73,18 +73,24 @@ export default async function MachineDetailPage({
   const unit = machine.reading_type === "hours" ? "hr" : "km";
   const so = soStatus(machine);
 
-  // Efficiency history, oldest first for the chart.
+  // Efficiency history — each fill attributed to the full distance/hours
+  // it covered through the NEXT fill (see efficiency.ts), not just its
+  // own day's movement. Already oldest-first. The metricByLogId map lets
+  // the daily-report table below look up each row's figure without
+  // recomputing the whole machine's fill history per row.
+  const fillMetrics = computeFillMetrics(machine, logs, machine.current_reading).filter(
+    (fm) => fm.plausible,
+  );
+  const metricByLogId = new Map(fillMetrics.map((fm) => [fm.log_id, fm]));
   const pointUnit: "L/hr" | "km/L" = machine.reading_type === "hours" ? "L/hr" : "km/L";
-  const points: EfficiencyPoint[] = logs
-    .filter((l) => dayMetric(machine, l) != null)
-    .map((l) => ({
-      machine_id: machine.id,
-      machine_label: machine.name,
-      entry_date: l.log_date,
-      value: dayMetric(machine, l)!,
-      unit: pointUnit,
-    }))
-    .reverse();
+  const points: EfficiencyPoint[] = fillMetrics.map((fm) => ({
+    machine_id: machine.id,
+    machine_label: machine.name,
+    entry_date: fm.log_date,
+    value: fm.value,
+    unit: pointUnit,
+    provisional: fm.provisional,
+  }));
 
   // Trending: last 7 fuel-days vs the 7 immediately before that — a quick
   // "is this getting worse" read, distinct from the formal 90-day
@@ -285,7 +291,7 @@ export default async function MachineDetailPage({
               </tr>
             ) : (
               logs.slice(0, 100).map((l) => {
-                const metric = dayMetric(machine, l);
+                const metric = metricByLogId.get(l.id);
                 return (
                   <TRow key={l.id}>
                     <TD className="whitespace-nowrap">{l.log_date}</TD>
@@ -309,7 +315,21 @@ export default async function MachineDetailPage({
                       )}
                     </TD>
                     <TD className="text-right font-mono tabular-nums text-ink-2">
-                      {metric != null ? `${metric.toFixed(2)} ${machine.reading_type === "hours" ? "L/hr" : "km/L"}` : "—"}
+                      {metric ? (
+                        <>
+                          {metric.value.toFixed(2)} {metric.unit}
+                          {metric.provisional && (
+                            <span
+                              className="ml-1 text-[10px] text-ink-3"
+                              title="No later fill yet to close this one out — estimate using the current reading"
+                            >
+                              so far
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </TD>
                     <TD className="text-right font-mono tabular-nums">
                       {l.total_cost != null ? inr(Number(l.total_cost)) : "—"}

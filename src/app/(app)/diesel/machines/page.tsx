@@ -6,7 +6,7 @@ import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { NotMetered, StatusPill } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
 import { soStatus, type Machine } from "@/lib/diesel/types";
-import { dayMetric } from "@/lib/diesel/efficiency";
+import { computeFillMetrics } from "@/lib/diesel/efficiency";
 import { NewMachineButton } from "./MachineForm";
 import { MachineActions, MeterBrokenControl } from "./MachineActions";
 import { MachineRequestButtons } from "./MachineRequestButtons";
@@ -91,7 +91,7 @@ export default async function MachinesPage({
         .eq("status", "pending"),
       supabase
         .from("daily_logs")
-        .select("machine_id, opening_reading, closing_reading, fuel_issued_liters")
+        .select("id, machine_id, log_date, opening_reading, closing_reading, fuel_issued_liters")
         .gt("fuel_issued_liters", 0)
         .gte("log_date", avgCutoff),
     ]);
@@ -102,8 +102,17 @@ export default async function MachinesPage({
   const siteCode = new Map(siteList.map((p) => [p.id, p.code]));
 
   // Current running average (last 90 days) per machine — km/L or L/hr,
-  // matching how the machine is metered.
-  type RecentLog = { machine_id: string; opening_reading: number | null; closing_reading: number | null; fuel_issued_liters: number };
+  // matching how the machine is metered. Each fill is attributed to the
+  // full distance/hours it covered through the NEXT fill (see
+  // efficiency.ts), not just its own day's movement.
+  type RecentLog = {
+    id: string;
+    machine_id: string;
+    log_date: string;
+    opening_reading: number | null;
+    closing_reading: number | null;
+    fuel_issued_liters: number;
+  };
   const logsByMachine = new Map<string, RecentLog[]>();
   for (const l of (recentLogsRaw ?? []) as RecentLog[]) {
     (logsByMachine.get(l.machine_id) ?? logsByMachine.set(l.machine_id, []).get(l.machine_id)!).push(l);
@@ -112,11 +121,9 @@ export default async function MachinesPage({
   for (const m of machines) {
     const rows = logsByMachine.get(m.id);
     if (!rows || rows.length === 0) continue;
-    const vals: number[] = [];
-    for (const l of rows) {
-      const value = dayMetric(m, l);
-      if (value != null) vals.push(value);
-    }
+    const vals = computeFillMetrics(m, rows, m.current_reading)
+      .filter((fm) => fm.plausible)
+      .map((fm) => fm.value);
     if (vals.length > 0) runningAvg.set(m.id, vals.reduce((s, v) => s + v, 0) / vals.length);
   }
   // machine_id → the type of its open request (if any).

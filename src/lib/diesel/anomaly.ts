@@ -1,41 +1,39 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { DailyLog, Machine } from "./types";
-import { computeDayMetric, dayMetric } from "./efficiency";
+import { computeFillMetrics, type FillMetric } from "./efficiency";
 
 /* Rule-based anomaly detection on DAILY logs.
 
-   Metric per machine type (only for days with fuel issued AND movement):
-     km    → km/L  (distance per liter — higher is better)
-     hours → L/hr  (consumption per running hour — lower is better)
-   A >30% deviation from the machine's own rolling average raises a flag;
-   >60% escalates to high severity.
+   Efficiency (km/L or L/hr) is measured per FILL, not per calendar day —
+   see efficiency.ts for why: a tank topped up today might run the machine
+   for several more days, so blaming all of today's fuel on today's
+   movement makes every fill-day look artificially bad. A fill's true
+   efficiency only resolves once the NEXT fill happens (that's what bounds
+   how far it went), so the efficiency-based checks below evaluate the
+   fill that just got CLOSED OUT by today's entry, not today's own
+   (still-open) fill — computeAnomaliesForLog runs on every new log, but
+   an efficiency flag can land on an EARLIER log's id.
 
-   There's no separate "meter gap" check: opening is never typed in by a
-   human (it's always the machine's carried-forward current_reading), so
-   a day's opening always equals the previous reading by construction. A
-   machine that ran an unusual distance overnight still surfaces here,
-   through the efficiency deviation on that day's numbers.
-
-   Other rules:
+   Other rules (unaffected by any of this — they only ever need today's
+   own numbers):
      fuel_no_movement fuel issued but the meter didn't move
      over_capacity    more fuel issued than the tank holds
      missing_reading  fuel issued but no closing reading recorded
-     declining_trend  a slow multi-week slide a single-day check can't
-                       catch — see below */
+     breakdown/maintenance status reported */
 
 const DEVIATION_THRESHOLD = 0.3;
 const HIGH_DEVIATION = 0.6;
-const ROLLING_WINDOW = 7; // prior logged days considered for the day-vs-average check
+const ROLLING_WINDOW = 7; // prior closed fills considered for the vs-average check
 
-// A single day's number vs. a 7-day average can miss a slow decline,
-// because that same 7-day window drifts down right along with the
-// vehicle. So this compares two averages instead: a short RECENT one
-// against a longer BASELINE that excludes the recent weeks entirely (so
-// it can't be dragged down by the very decline being detected).
-const RECENT_WINDOW = 7; // most recent fuel-days
+// A single fill's number vs. a 7-fill average can miss a slow decline,
+// because that same window drifts down right along with the vehicle. So
+// this compares two averages instead: a short RECENT one against a longer
+// BASELINE that excludes the recent weeks entirely (so it can't be
+// dragged down by the very decline being detected).
+const RECENT_WINDOW = 7; // most recent closed fills
 const BASELINE_EXCLUDE_DAYS = 14; // gap between "recent" and "baseline"
 const BASELINE_LOOKBACK_DAYS = 90; // how far back the baseline is allowed to reach
-const BASELINE_MIN_ENTRIES = 10; // need this many fuel-days for a meaningful baseline
+const BASELINE_MIN_ENTRIES = 10; // need this many closed fills for a meaningful baseline
 const DECLINE_THRESHOLD = 0.15; // recent trailing baseline by more than this → flagged
 const DECLINE_HIGH_THRESHOLD = 0.3;
 
@@ -52,48 +50,44 @@ function shiftDate(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-async function checkDecliningTrend(
+async function fetchClosedFillMetrics(
   admin: SupabaseClient,
   machine: Machine,
-  log: DailyLog,
-): Promise<NewAnomalyFlag | null> {
-  const unit = machine.reading_type === "hours" ? "L/hr" : "km/L";
-
-  const { data: recentRaw } = await admin
+  uptoDate: string,
+  sinceDate: string,
+): Promise<FillMetric[]> {
+  const { data } = await admin
     .from("daily_logs")
-    .select("*")
+    .select("id, log_date, opening_reading, closing_reading, fuel_issued_liters")
     .eq("machine_id", machine.id)
     .gt("fuel_issued_liters", 0)
-    .lte("log_date", log.log_date)
-    .order("log_date", { ascending: false })
-    .limit(RECENT_WINDOW);
+    .gte("log_date", sinceDate)
+    .lte("log_date", uptoDate)
+    .order("log_date", { ascending: true });
 
-  const baselineStart = shiftDate(log.log_date, -BASELINE_LOOKBACK_DAYS);
-  const baselineEnd = shiftDate(log.log_date, -BASELINE_EXCLUDE_DAYS);
-  const { data: baselineRaw } = await admin
-    .from("daily_logs")
-    .select("*")
-    .eq("machine_id", machine.id)
-    .gt("fuel_issued_liters", 0)
-    .gte("log_date", baselineStart)
-    .lte("log_date", baselineEnd)
-    .order("log_date", { ascending: false })
-    .limit(BASELINE_LOOKBACK_DAYS);
+  // No currentReading passed — the most recent (still-open) fill in this
+  // range is dropped rather than estimated, since it hasn't actually
+  // closed yet as far as this query goes.
+  return computeFillMetrics(machine, (data ?? []) as DailyLog[]);
+}
 
-  const recentMetrics = ((recentRaw ?? []) as DailyLog[])
-    .map((l) => dayMetric(machine, l))
-    .filter((v): v is number => v != null);
-  const baselineMetrics = ((baselineRaw ?? []) as DailyLog[])
-    .map((l) => dayMetric(machine, l))
-    .filter((v): v is number => v != null);
+function checkDecliningTrend(
+  machine: Machine,
+  closed: FillMetric[],
+  justClosed: FillMetric,
+): NewAnomalyFlag | null {
+  const plausible = closed.filter((m) => m.plausible);
+  const recent = plausible.slice(-RECENT_WINDOW);
 
-  if (recentMetrics.length < 3 || baselineMetrics.length < BASELINE_MIN_ENTRIES) {
+  const baselineEnd = shiftDate(justClosed.log_date, -BASELINE_EXCLUDE_DAYS);
+  const baseline = plausible.filter((m) => m.log_date <= baselineEnd);
+
+  if (recent.length < 3 || baseline.length < BASELINE_MIN_ENTRIES) {
     return null; // not enough history either side yet
   }
 
-  const recentAvg = recentMetrics.reduce((s, v) => s + v, 0) / recentMetrics.length;
-  const baselineAvg =
-    baselineMetrics.reduce((s, v) => s + v, 0) / baselineMetrics.length;
+  const recentAvg = recent.reduce((s, m) => s + m.value, 0) / recent.length;
+  const baselineAvg = baseline.reduce((s, m) => s + m.value, 0) / baseline.length;
   if (baselineAvg <= 0) return null;
 
   // "Worse" means opposite things for the two metrics: lower km/L, or
@@ -105,11 +99,12 @@ async function checkDecliningTrend(
 
   if (changeRatio <= DECLINE_THRESHOLD) return null;
 
+  const unit = justClosed.unit;
   return {
-    log_id: log.id,
+    log_id: justClosed.log_id,
     type: "declining_trend",
     severity: changeRatio > DECLINE_HIGH_THRESHOLD ? "high" : "medium",
-    message: `Last ${recentMetrics.length} fuel days average ${recentAvg.toFixed(2)} ${unit} — ${(changeRatio * 100).toFixed(0)}% worse than this machine's ${baselineMetrics.length}-day baseline of ${baselineAvg.toFixed(2)} ${unit}. Could be a developing mechanical issue.`,
+    message: `Last ${recent.length} fills average ${recentAvg.toFixed(2)} ${unit} — ${(changeRatio * 100).toFixed(0)}% worse than this machine's ${baseline.length}-fill baseline of ${baselineAvg.toFixed(2)} ${unit}. Could be a developing mechanical issue.`,
   };
 }
 
@@ -134,7 +129,6 @@ export async function computeAnomaliesForLog(
     });
   }
 
-  const unit = machine.reading_type === "hours" ? "L/hr" : "km/L";
   const fuel = Number(log.fuel_issued_liters);
   const delta =
     log.opening_reading != null && log.closing_reading != null
@@ -153,11 +147,11 @@ export async function computeAnomaliesForLog(
   if (fuel > 0 && log.closing_reading == null) {
     // A machine flagged meter-broken can't produce a reading by design —
     // that's expected, not an oversight, but it also means none of the
-    // reading-based checks below (no-movement, efficiency, decline) can
-    // run for this fill. Surface it as its own type, at medium severity,
-    // so someone actually eyeballs whether the fuel amount is reasonable
-    // in place of the automatic cross-check — this will keep recurring
-    // every fuel day until the meter is fixed and an admin clears it.
+    // reading-based checks below can run for this fill. Surface it as its
+    // own type, at medium severity, so someone actually eyeballs whether
+    // the fuel amount is reasonable in place of the automatic cross-check
+    // — this will keep recurring every fuel day until the meter is fixed
+    // and an admin clears it.
     if (machine.meter_broken) {
       flags.push({
         log_id: log.id,
@@ -187,57 +181,60 @@ export async function computeAnomaliesForLog(
     });
   }
 
-  // An absolute sanity ceiling/floor, independent of any rolling average —
-  // this is what catches a machine's very first-ever entry, which has no
-  // prior history to compare against and would otherwise sail through the
-  // deviation check below with zero prior data points.
-  const rawMetric = computeDayMetric(machine, log);
-  if (rawMetric != null && !rawMetric.plausible) {
-    flags.push({
-      log_id: log.id,
-      type: "implausible_efficiency",
-      severity: "high",
-      message: `Today works out to ${rawMetric.value.toFixed(2)} ${rawMetric.unit}, which isn't physically plausible — likely this machine's first entry using its registered starting reading instead of a real previous close, or a reading typo. Check the opening/closing readings.`,
-    });
-  }
+  // Efficiency checks operate on FILLS, not on today's own log — a fill's
+  // true efficiency only resolves once the next fill closes it out. If
+  // today's entry has fuel, it just closed out whichever fill preceded
+  // it; that's what gets judged here (today's own fill stays open/
+  // unjudged until whatever comes after it).
+  if (fuel > 0) {
+    const baselineStart = shiftDate(log.log_date, -BASELINE_LOOKBACK_DAYS);
+    const closed = await fetchClosedFillMetrics(admin, machine, log.log_date, baselineStart);
+    const justClosed = closed[closed.length - 1];
 
-  // Efficiency deviation vs this machine's own recent average — this is
-  // also what surfaces an unusually large overnight/off-hours jump.
-  const current = rawMetric?.plausible ? rawMetric.value : null;
-  if (current != null) {
-    const { data: prior } = await admin
-      .from("daily_logs")
-      .select("*")
-      .eq("machine_id", machine.id)
-      .lt("log_date", log.log_date)
-      .gt("fuel_issued_liters", 0)
-      .order("log_date", { ascending: false })
-      .limit(ROLLING_WINDOW);
+    if (justClosed) {
+      const unit = justClosed.unit;
 
-    const priorMetrics = ((prior ?? []) as DailyLog[])
-      .map((l) => dayMetric(machine, l))
-      .filter((v): v is number => v != null);
-
-    if (priorMetrics.length > 0) {
-      const avg = priorMetrics.reduce((s, v) => s + v, 0) / priorMetrics.length;
-      if (avg > 0) {
-        const deviation = Math.abs(current - avg) / avg;
-        if (deviation > DEVIATION_THRESHOLD) {
-          flags.push({
-            log_id: log.id,
-            type: "efficiency_deviation",
-            severity: deviation > HIGH_DEVIATION ? "high" : "medium",
-            message: `Today works out to ${current.toFixed(2)} ${unit} — ${(deviation * 100).toFixed(0)}% off this machine's recent average of ${avg.toFixed(2)} ${unit}.`,
-          });
+      // An absolute sanity ceiling/floor, independent of any rolling
+      // average — this is what catches a fill with no real prior history
+      // to compare against (e.g. the machine's first-ever fill, now
+      // closed out by this one) and would otherwise sail through the
+      // deviation check below with zero prior data points.
+      if (!justClosed.plausible) {
+        flags.push({
+          log_id: justClosed.log_id,
+          type: "implausible_efficiency",
+          severity: "high",
+          message: `That fill worked out to ${justClosed.value.toFixed(2)} ${unit} (fuel ÷ distance/hours through the next fill), which isn't physically plausible — likely a bad reading somewhere in that stretch. Check the opening/closing readings around ${justClosed.log_date}.`,
+        });
+      } else {
+        // Deviation vs. this machine's own recent (plausible, closed) fills.
+        const prior = closed
+          .slice(0, -1)
+          .filter((m) => m.plausible)
+          .slice(-ROLLING_WINDOW);
+        if (prior.length > 0) {
+          const avg = prior.reduce((s, m) => s + m.value, 0) / prior.length;
+          if (avg > 0) {
+            const deviation = Math.abs(justClosed.value - avg) / avg;
+            if (deviation > DEVIATION_THRESHOLD) {
+              flags.push({
+                log_id: justClosed.log_id,
+                type: "efficiency_deviation",
+                severity: deviation > HIGH_DEVIATION ? "high" : "medium",
+                message: `That fill worked out to ${justClosed.value.toFixed(2)} ${unit} — ${(deviation * 100).toFixed(0)}% off this machine's recent average of ${avg.toFixed(2)} ${unit}.`,
+              });
+            }
+          }
         }
+
+        // Slow, sustained decline — a separate check since the one above
+        // can't see a drift that its own comparison window is also
+        // sliding along with.
+        const declineFlag = checkDecliningTrend(machine, closed, justClosed);
+        if (declineFlag) flags.push(declineFlag);
       }
     }
   }
-
-  // Slow, sustained decline — a separate check since the one above can't
-  // see a drift that its own comparison window is also sliding along with.
-  const declineFlag = await checkDecliningTrend(admin, machine, log);
-  if (declineFlag) flags.push(declineFlag);
 
   return flags;
 }
