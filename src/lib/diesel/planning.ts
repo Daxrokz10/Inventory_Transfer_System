@@ -69,8 +69,29 @@ export interface StandingDemand {
 
 const SHRADDHA_VENDOR_RE = /shraddha/i;
 
+// The fixed set of categories the fleet-wide panel tracks — the company's
+// own curated "these are the standing rental categories that matter for a
+// buy/rent call" list (source: the June 2026 rental provision workbook),
+// kept as a stable list so the panel doesn't get cluttered by a one-off
+// hired item, nor drop a category just because it happens to be at 0 right
+// now. Numbers per type are live; this list of *which types show up* is not.
+export const STANDING_RENTAL_TYPES = [
+  "Excavator",
+  "Dumper / Tipper",
+  "Backhoe Loader (JCB)",
+  "Tractor",
+  "Concrete Boom Placer",
+  "Self-Loading Mixer (Ajax)",
+  "Trailer",
+  "Bus",
+  "Car / Jeep",
+  "Baby Roller",
+  "DG Set",
+] as const;
+
 /** Build the live "what do we rent every month" table straight off the
-    machines register: every active external machine, grouped by type. */
+    machines register, for the fixed STANDING_RENTAL_TYPES categories — one
+    row per type, even if nothing of that type is currently hired. */
 export function standingDemandFromFleet(machines: Machine[]): StandingDemand[] {
   interface Acc {
     units: number;
@@ -80,18 +101,18 @@ export function standingDemandFromFleet(machines: Machine[]): StandingDemand[] {
     shraddhaRent: number;
     missingRentUnits: number;
   }
-  const byType = new Map<string, Acc>();
+  const trackedTypes = new Set<string>(STANDING_RENTAL_TYPES);
+  const byType = new Map<string, Acc>(
+    STANDING_RENTAL_TYPES.map((t) => [
+      t,
+      { units: 0, sites: new Set<string>(), rent: 0, shraddhaUnits: 0, shraddhaRent: 0, missingRentUnits: 0 },
+    ]),
+  );
 
   for (const m of machines) {
     if (!m.is_active || m.ownership !== "external") continue;
-    const acc = byType.get(m.machine_type) ?? {
-      units: 0,
-      sites: new Set<string>(),
-      rent: 0,
-      shraddhaUnits: 0,
-      shraddhaRent: 0,
-      missingRentUnits: 0,
-    };
+    if (!trackedTypes.has(m.machine_type)) continue;
+    const acc = byType.get(m.machine_type)!;
     const rent = m.monthly_rent ?? 0;
     const isShraddha = SHRADDHA_VENDOR_RE.test(m.vendor_name ?? "");
 
@@ -103,18 +124,20 @@ export function standingDemandFromFleet(machines: Machine[]): StandingDemand[] {
       acc.shraddhaUnits += 1;
       acc.shraddhaRent += rent;
     }
-    byType.set(m.machine_type, acc);
   }
 
-  return [...byType.entries()].map(([machineType, acc]) => ({
-    machineType,
-    unitsRented: acc.units,
-    sites: acc.sites.size,
-    monthlyRent: acc.rent,
-    shraddhaUnits: acc.shraddhaUnits || undefined,
-    shraddhaMonthlyRent: acc.shraddhaRent || undefined,
-    missingRentUnits: acc.missingRentUnits,
-  }));
+  return STANDING_RENTAL_TYPES.map((machineType) => {
+    const acc = byType.get(machineType)!;
+    return {
+      machineType,
+      unitsRented: acc.units,
+      sites: acc.sites.size,
+      monthlyRent: acc.rent,
+      shraddhaUnits: acc.shraddhaUnits || undefined,
+      shraddhaMonthlyRent: acc.shraddhaRent || undefined,
+      missingRentUnits: acc.missingRentUnits,
+    };
+  });
 }
 
 export type OwnVsRentCall = "buy-strong" | "buy-consider" | "rent" | "no-cost-data";
