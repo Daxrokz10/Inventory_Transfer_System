@@ -42,17 +42,18 @@ export function costProfileFor(machineType: string): CostProfile | null {
 /** Machine types the cost table covers — for the requirement form's picker. */
 export const COSTED_MACHINE_TYPES = RENTAL_VS_NEW.map((c) => c.machineType);
 
-// ---- Standing rental demand (source: MONTHLY RENTAL PROVISON JUNE.xlsx,
-// aggregated across all site tabs). This is the fleet-wide baseline the
-// company rents *every month* — the real "should we own this?" signal,
-// independent of any single site requirement's duration. Snapshot for now;
-// later this can be recomputed from a rental-history table in the DB. ----
+// ---- Standing rental demand — derived live from the machines register
+// (see standingDemandFromFleet below), not a spreadsheet snapshot. This is
+// the fleet-wide baseline the company rents *every month* — the real
+// "should we own this?" signal, independent of any single site
+// requirement's duration.
 //
 // Shraddha (Corporation) is SGC's own sister company, not a market vendor —
 // paying them "rent" doesn't reflect genuine external dependency the way
 // paying an outside hire vendor does. Their units are carved out of the
-// buy/rent signal below (shraddhaUnits/shraddhaMonthlyRent), so the verdict
-// is driven only by what we actually pay third parties.
+// buy/rent signal below (shraddhaUnits/shraddhaMonthlyRent), detected off
+// each machine's vendor_name, so the verdict is driven only by what we
+// actually pay third parties.
 export interface StandingDemand {
   machineType: string;
   unitsRented: number;
@@ -60,23 +61,61 @@ export interface StandingDemand {
   monthlyRent: number;
   shraddhaUnits?: number;
   shraddhaMonthlyRent?: number;
+  /** External units of this type with no monthly_rent entered yet — their
+      cost is silently counted as ₹0 above, so the UI needs this to warn
+      the numbers are incomplete rather than presenting them as final. */
+  missingRentUnits: number;
 }
 
-export const STANDING_RENTAL_DEMAND: StandingDemand[] = [
-  { machineType: "Excavator", unitsRented: 20, sites: 9, monthlyRent: 3180000, shraddhaUnits: 5, shraddhaMonthlyRent: 700000 },
-  { machineType: "Dumper / Tipper", unitsRented: 18, sites: 7, monthlyRent: 2310000, shraddhaUnits: 2, shraddhaMonthlyRent: 200000 },
-  { machineType: "Backhoe Loader (JCB)", unitsRented: 28, sites: 19, monthlyRent: 2074799, shraddhaUnits: 18, shraddhaMonthlyRent: 1159999 },
-  { machineType: "Tractor", unitsRented: 22, sites: 9, monthlyRent: 570000 },
-  { machineType: "Concrete Boom Placer", unitsRented: 1, sites: 1, monthlyRent: 415000 },
-  { machineType: "Self-Loading Mixer (Ajax)", unitsRented: 2, sites: 2, monthlyRent: 295000 },
-  { machineType: "Trailer", unitsRented: 1, sites: 1, monthlyRent: 110000 },
-  { machineType: "Bus", unitsRented: 1, sites: 1, monthlyRent: 100000 },
-  { machineType: "Car / Jeep", unitsRented: 2, sites: 2, monthlyRent: 95000 },
-  { machineType: "Baby Roller", unitsRented: 1, sites: 1, monthlyRent: 60000 },
-  { machineType: "DG Set", unitsRented: 1, sites: 1, monthlyRent: 35000 },
-];
+const SHRADDHA_VENDOR_RE = /shraddha/i;
 
-export const STANDING_RENTAL_SOURCE = "June 2026 rental provision (fleet-wide)";
+/** Build the live "what do we rent every month" table straight off the
+    machines register: every active external machine, grouped by type. */
+export function standingDemandFromFleet(machines: Machine[]): StandingDemand[] {
+  interface Acc {
+    units: number;
+    sites: Set<string>;
+    rent: number;
+    shraddhaUnits: number;
+    shraddhaRent: number;
+    missingRentUnits: number;
+  }
+  const byType = new Map<string, Acc>();
+
+  for (const m of machines) {
+    if (!m.is_active || m.ownership !== "external") continue;
+    const acc = byType.get(m.machine_type) ?? {
+      units: 0,
+      sites: new Set<string>(),
+      rent: 0,
+      shraddhaUnits: 0,
+      shraddhaRent: 0,
+      missingRentUnits: 0,
+    };
+    const rent = m.monthly_rent ?? 0;
+    const isShraddha = SHRADDHA_VENDOR_RE.test(m.vendor_name ?? "");
+
+    acc.units += 1;
+    acc.sites.add(m.project_id);
+    acc.rent += rent;
+    if (m.monthly_rent == null) acc.missingRentUnits += 1;
+    if (isShraddha) {
+      acc.shraddhaUnits += 1;
+      acc.shraddhaRent += rent;
+    }
+    byType.set(m.machine_type, acc);
+  }
+
+  return [...byType.entries()].map(([machineType, acc]) => ({
+    machineType,
+    unitsRented: acc.units,
+    sites: acc.sites.size,
+    monthlyRent: acc.rent,
+    shraddhaUnits: acc.shraddhaUnits || undefined,
+    shraddhaMonthlyRent: acc.shraddhaRent || undefined,
+    missingRentUnits: acc.missingRentUnits,
+  }));
+}
 
 export type OwnVsRentCall = "buy-strong" | "buy-consider" | "rent" | "no-cost-data";
 
@@ -101,6 +140,9 @@ export interface OwnVsRentRow {
       which can differ from the cost sheet's single headline rate. */
   perUnitPaybackMonths: number | null;
   call: OwnVsRentCall;
+  /** External units of this type with no monthly_rent entered — the rent
+      figures above undercount by this much until someone fills it in. */
+  missingRentUnits: number;
 }
 
 // Own the persistent base when the demand is genuinely standing (several
@@ -118,7 +160,7 @@ export function fleetOwnVsRent(machines: Machine[]): OwnVsRentRow[] {
     }
   }
 
-  return STANDING_RENTAL_DEMAND.map((d) => {
+  return standingDemandFromFleet(machines).map((d) => {
     const shraddhaUnits = d.shraddhaUnits ?? 0;
     const shraddhaMonthlyRent = d.shraddhaMonthlyRent ?? 0;
     const externalUnits = d.unitsRented - shraddhaUnits;
@@ -154,6 +196,7 @@ export function fleetOwnVsRent(machines: Machine[]): OwnVsRentRow[] {
       externalMonthlyRent,
       perUnitPaybackMonths,
       call,
+      missingRentUnits: d.missingRentUnits,
     };
   }).sort((a, b) => b.annualRent - a.annualRent);
 }

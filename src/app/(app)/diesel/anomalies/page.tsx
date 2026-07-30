@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { Card } from "@/components/ui/Card";
@@ -12,6 +13,9 @@ const SEVERITY_TONE: Record<string, BadgeTone> = {
   medium: "warn",
   high: "danger",
 };
+
+// Highest severity first within each resolved/open group.
+const SEVERITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
 export default async function AnomaliesPage() {
   const supabase = await createClient();
@@ -39,9 +43,18 @@ export default async function AnomaliesPage() {
       supabase.from("projects").select("id, name"),
     ]);
 
-  const flags = flagsRaw ?? [];
   const machineById = new Map((machines ?? []).map((m) => [m.id, m]));
   const siteById = new Map((projects ?? []).map((p) => [p.id, p.name]));
+
+  // Open flags first, then ranked by severity (high → low), then newest first
+  // within each group — so the things most worth checking surface at the top
+  // instead of being scattered across the raw insert order.
+  const flags = [...(flagsRaw ?? [])].sort((a, b) => {
+    if (a.resolved !== b.resolved) return a.resolved ? 1 : -1;
+    const rank = (SEVERITY_RANK[a.severity] ?? 99) - (SEVERITY_RANK[b.severity] ?? 99);
+    if (rank !== 0) return rank;
+    return b.created_at.localeCompare(a.created_at);
+  });
 
   return (
     <div className="space-y-6">
@@ -90,7 +103,16 @@ export default async function AnomaliesPage() {
                       {siteById.get(log.project_id) ?? "—"}
                     </TD>
                     <TD className="font-medium">
-                      {m?.name ?? "—"}
+                      {m ? (
+                        <Link
+                          href={`/diesel/machines/${m.id}`}
+                          className="text-accent hover:underline"
+                        >
+                          {m.name}
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
                       {m?.registration_no && (
                         <span className="font-normal text-ink-3">
                           {" "}

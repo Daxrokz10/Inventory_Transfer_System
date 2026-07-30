@@ -83,9 +83,20 @@ export function EditMachineForm({
           </Select>
         </Field>
         {ownership === "external" && (
-          <Field label="Vendor name">
-            <Input name="vendor_name" required defaultValue={machine.vendor_name ?? ""} />
-          </Field>
+          <>
+            <Field label="Vendor name">
+              <Input name="vendor_name" required defaultValue={machine.vendor_name ?? ""} />
+            </Field>
+            <Field label="Monthly rent (₹)" hint="Feeds the Own vs Rent panel">
+              <Input
+                name="monthly_rent"
+                type="number"
+                step="1"
+                min="0"
+                defaultValue={machine.monthly_rent ?? ""}
+              />
+            </Field>
+          </>
         )}
         {(trackFuel || trackMeter) && (
           <Field

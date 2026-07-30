@@ -168,9 +168,14 @@ export function NewMachineButton({
             <Input name="tank_capacity_liters" type="number" step="0.1" min="0" />
           </Field>
           {ownership === "external" && (
-            <Field label="Vendor name">
-              <Input name="vendor_name" required placeholder="Hiring vendor" />
-            </Field>
+            <>
+              <Field label="Vendor name">
+                <Input name="vendor_name" required placeholder="Hiring vendor" />
+              </Field>
+              <Field label="Monthly rent (₹)" hint="Optional — feeds the Own vs Rent panel">
+                <Input name="monthly_rent" type="number" step="1" min="0" />
+              </Field>
+            </>
           )}
         </div>
 

@@ -8,6 +8,10 @@ export interface Machine {
   fuel_type: "diesel" | "petrol";
   ownership: "internal" | "external";
   vendor_name: string | null;
+  /** What we pay per month for this hired unit — the input the Own vs Rent
+      panel sums per machine_type to judge buy-vs-rent. Null for internal
+      machines, and for external ones not yet priced. */
+  monthly_rent: number | null;
   tank_capacity_liters: number | null;
   is_active: boolean;
   /** False for assets whose fuel isn't tracked — electric/no-engine items

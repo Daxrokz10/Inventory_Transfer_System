@@ -8,7 +8,6 @@ import type { Machine, SiteRequirement } from "@/lib/diesel/types";
 import {
   recommend,
   fleetOwnVsRent,
-  STANDING_RENTAL_SOURCE,
   type Recommendation,
   type SiteMeta,
   type OwnVsRentRow,
@@ -143,8 +142,8 @@ export default async function PlanningPage() {
       )}
 
       <p className="font-mono text-[11px] text-ink-3">
-        Rent/buy figures — MONTHLY REVENUE TO COST.xlsx, &quot;RENTAL VS NEW&quot; tab,
-        June 2026.
+        Buy price/breakeven — MONTHLY REVENUE TO COST.xlsx, &quot;RENTAL VS NEW&quot; tab, June
+        2026. Rented units and rent paid are live from the machines register.
       </p>
     </div>
   );
@@ -209,6 +208,14 @@ function FleetOwnVsRentPanel({ rows }: { rows: OwnVsRentRow[] }) {
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono tabular-nums">
                   {inr(r.externalMonthlyRent * 12)}
+                  {r.missingRentUnits > 0 && (
+                    <span
+                      className="ml-1 text-[10px] font-sans text-warn"
+                      title={`${r.missingRentUnits} unit${r.missingRentUnits === 1 ? "" : "s"} of this type have no monthly rent entered — this total undercounts them as ₹0.`}
+                    >
+                      ⚠ {r.missingRentUnits} unpriced
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2.5 text-right font-mono tabular-nums text-ink-2">
                   {r.cost ? inr(r.cost.purchasePrice) : "—"}
@@ -225,10 +232,12 @@ function FleetOwnVsRentPanel({ rows }: { rows: OwnVsRentRow[] }) {
         </table>
       </div>
       <p className="border-t border-line px-5 py-2 font-mono text-[11px] text-ink-3">
-        Source: {STANDING_RENTAL_SOURCE}. Payback = buy price ÷ average rent we actually pay
-        outside vendors for this type — Shraddha (SGC's sister company) is excluded from the
-        rent figures and the call, since paying them isn't real market dependency. Types with no
-        buy price show the rent as an unpriced opportunity.
+        Live count of active external (hired) machines and their entered monthly rent, from the
+        machines register. Payback = buy price ÷ average rent we actually pay outside vendors for
+        this type — Shraddha (SGC's sister company) is excluded from the rent figures and the
+        call, since paying them isn't real market dependency, detected by vendor name containing
+        &quot;Shraddha&quot;. Types with no buy price show the rent as an unpriced opportunity;
+        ⚠ marks types with hired units that have no rent entered yet, so the total understates them.
       </p>
     </Card>
   );
