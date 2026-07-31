@@ -365,13 +365,15 @@ function GroupBlock({
                   <Badge tone="warn">
                     External{m.vendor_name ? ` · ${m.vendor_name}` : ""}
                   </Badge>
-                  <p className="font-mono text-[11px] text-ink-3">
-                    {m.monthly_rent != null ? (
-                      <>₹{m.monthly_rent.toLocaleString("en-IN")}/mo</>
-                    ) : (
-                      <span className="text-warn">rent not entered</span>
-                    )}
-                  </p>
+                  {isAdmin && (
+                    <p className="font-mono text-[11px] text-ink-3">
+                      {m.monthly_rent != null ? (
+                        <>₹{m.monthly_rent.toLocaleString("en-IN")}/mo</>
+                      ) : (
+                        <span className="text-warn">rent not entered</span>
+                      )}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <Badge tone="accent">Internal</Badge>

@@ -172,9 +172,11 @@ export function NewMachineButton({
               <Field label="Vendor name">
                 <Input name="vendor_name" required placeholder="Hiring vendor" />
               </Field>
-              <Field label="Monthly rent (₹)" hint="Optional — feeds the Own vs Rent panel">
-                <Input name="monthly_rent" type="number" step="1" min="0" />
-              </Field>
+              {isAdmin && (
+                <Field label="Monthly rent (₹)" hint="Optional — feeds the Own vs Rent panel">
+                  <Input name="monthly_rent" type="number" step="1" min="0" />
+                </Field>
+              )}
             </>
           )}
         </div>
