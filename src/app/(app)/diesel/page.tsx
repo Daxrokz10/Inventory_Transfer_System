@@ -4,7 +4,7 @@ import { Card, CardLabel } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge, type BadgeTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Select } from "@/components/ui/Field";
+import { Field, Input, Select } from "@/components/ui/Field";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import type { DailyLog, Machine, FuelReceipt } from "@/lib/diesel/types";
 import { getPricesForCity } from "@/lib/diesel/fuelPrice";
@@ -560,6 +560,12 @@ export default async function DieselPage({
   }
 
   // ---------- Admin: cross-site dashboard ----------
+  // The report table below is scoped to one day at a time (default today) —
+  // charts/30-day totals still draw on the broader fetch below, but the
+  // "Daily Report" listing itself should show that day's reports, not a
+  // scrolling dump of the last 1000 rows across every date.
+  const reportDate = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : today;
+
   const logsQuery = supabase
     .from("daily_logs")
     .select("*")
@@ -567,6 +573,16 @@ export default async function DieselPage({
     .limit(1000);
   if (siteFilter) logsQuery.eq("project_id", siteFilter);
   if (sp.machine) logsQuery.eq("machine_id", sp.machine);
+
+  // A dedicated, exact query for the report table — the broad fetch above
+  // (most-recent 1000 rows) can miss an older reportDate entirely once
+  // there's more history than that across every site.
+  const dayLogsQuery = supabase
+    .from("daily_logs")
+    .select("*")
+    .eq("log_date", reportDate);
+  if (siteFilter) dayLogsQuery.eq("project_id", siteFilter);
+  if (sp.machine) dayLogsQuery.eq("machine_id", sp.machine);
 
   const flagsQuery = supabase
     .from("anomaly_flags")
@@ -585,15 +601,17 @@ export default async function DieselPage({
     .order("created_at", { ascending: false });
   if (siteFilter) pendingRequestsQuery.eq("project_id", siteFilter);
 
-  const [{ data: logsRaw }, { data: flagsRaw }, prices, { data: pendingReqRows }] =
+  const [{ data: logsRaw }, { data: dayLogsRaw }, { data: flagsRaw }, prices, { data: pendingReqRows }] =
     await Promise.all([
       logsQuery,
+      dayLogsQuery,
       flagsQuery,
       getPricesForCity(siteCity, today),
       pendingRequestsQuery,
     ]);
 
   const logs = (logsRaw ?? []) as DailyLog[];
+  const dayLogs = (dayLogsRaw ?? []) as DailyLog[];
   const flags = flagsRaw ?? [];
   const machineById = new Map(machines.map((m) => [m.id, m]));
 
@@ -601,7 +619,9 @@ export default async function DieselPage({
   // by a site person) — the log itself is still real history and must
   // keep showing its machine's name/type, not just a blank dash.
   const missingMachineIds = [
-    ...new Set(logs.map((l) => l.machine_id).filter((id) => !machineById.has(id))),
+    ...new Set(
+      [...logs, ...dayLogs].map((l) => l.machine_id).filter((id) => !machineById.has(id)),
+    ),
   ];
   if (missingMachineIds.length) {
     const { data: inactiveMachines } = await supabase
@@ -648,7 +668,7 @@ export default async function DieselPage({
     <div className="space-y-6">
       <PageHeader
         title="Diesel Report — All Sites"
-        subtitle="Daily consumption, efficiency and anomalies across every site"
+        subtitle={`Daily consumption, efficiency and anomalies across every site — showing ${reportDate}`}
       />
 
       <form className="flex flex-wrap items-end gap-2">
@@ -669,6 +689,9 @@ export default async function DieselPage({
             </option>
           ))}
         </Select>
+        <Field label="Report date">
+          <Input type="date" name="date" defaultValue={reportDate} max={today} className="min-w-40" />
+        </Field>
         <Button type="submit" variant="secondary" size="sm">
           Apply
         </Button>
@@ -794,11 +817,12 @@ export default async function DieselPage({
       )}
 
       <DailyLogsBySite
-        logs={logs}
+        logs={dayLogs}
         machineById={machineById}
         projects={projects}
         rowMetric={rowMetric}
         runningAvgByMachine={runningAvgByMachine}
+        reportDate={reportDate}
       />
     </div>
   );
@@ -810,12 +834,14 @@ function DailyLogsBySite({
   projects,
   rowMetric,
   runningAvgByMachine,
+  reportDate,
 }: {
   logs: DailyLog[];
   machineById: Map<string, Machine>;
   projects: { id: string; name: string; code: string | null }[];
   rowMetric: Map<string, EfficiencyPoint>;
   runningAvgByMachine: Map<string, { value: number; unit: string }>;
+  reportDate: string;
 }) {
   const siteLabel = new Map(
     projects.map((p) => [p.id, p.code ? `${p.code} · ${p.name}` : p.name]),
@@ -831,7 +857,7 @@ function DailyLogsBySite({
   if (logs.length === 0) {
     return (
       <Card className="p-0">
-        <EmptyState message="No daily reports yet." />
+        <EmptyState message={`No daily reports for ${reportDate}.`} />
       </Card>
     );
   }

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field, Input, Select } from "@/components/ui/Field";
 import { cn } from "@/lib/cn";
-import { MACHINE_TYPES } from "@/lib/diesel/types";
+import { HOURS_METERED_TYPES, MACHINE_TYPES } from "@/lib/diesel/types";
 import { SoDurationField } from "./SoDurationField";
 
 export function NewMachineButton({
@@ -30,7 +30,12 @@ export function NewMachineButton({
   const [ownership, setOwnership] = useState<"internal" | "external">(
     isAdmin ? "internal" : "external",
   );
+  const [machineType, setMachineType] = useState("");
   const [readingType, setReadingType] = useState<"km" | "hours">("km");
+  // Some categories only ever run on an hour meter (a static batching plant
+  // has no odometer at all) — pick that automatically and stop the site
+  // person from second-guessing it, instead of leaving it a free choice.
+  const meterFixed = HOURS_METERED_TYPES.has(machineType);
   const [trackFuel, setTrackFuel] = useState(true);
   const [trackMeter, setTrackMeter] = useState(true);
   const [error, formAction, pending] = useActionState(addMachine, null);
@@ -114,7 +119,16 @@ export function NewMachineButton({
             <Input name="name" required placeholder="e.g. JCB 3DX" />
           </Field>
           <Field label="Machine type">
-            <Select name="machine_type" required defaultValue="">
+            <Select
+              name="machine_type"
+              required
+              value={machineType}
+              onChange={(e) => {
+                const t = e.target.value;
+                setMachineType(t);
+                if (HOURS_METERED_TYPES.has(t)) setReadingType("hours");
+              }}
+            >
               <option value="" disabled>
                 Select type…
               </option>
@@ -128,11 +142,18 @@ export function NewMachineButton({
           <Field label="Numberplate" hint="Leave blank for DG sets etc.">
             <Input name="registration_no" placeholder="GJ-21-AB-1234" />
           </Field>
-          <Field label="Metered by">
+          <Field
+            label="Metered by"
+            hint={meterFixed ? "Fixed for this machine type" : undefined}
+          >
+            {/* A disabled <select> submits nothing, so the actual value
+                travels via this hidden input instead — the select just
+                controls what the person sees and can change. */}
+            <input type="hidden" name="reading_type" value={readingType} />
             <Select
-              name="reading_type"
               required
               value={readingType}
+              disabled={meterFixed}
               onChange={(e) => setReadingType(e.target.value as "km" | "hours")}
             >
               <option value="km">Odometer (km)</option>

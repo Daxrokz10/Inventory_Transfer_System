@@ -165,6 +165,22 @@ export function efficiencyUnit(machine: Pick<Machine, "reading_type">) {
   return machine.reading_type === "hours" ? "L/hr" : "km/L";
 }
 
+/** Machine types whose meter is always hours, never km — physically these
+    run on an engine-hour meter (or an odometer makes no sense at all, e.g.
+    a static batching plant), so the "Metered by" choice isn't a per-machine
+    judgment call at registration time the way it is for a vehicle. */
+export const HOURS_METERED_TYPES = new Set<string>([
+  "DG Set",
+  "Excavator",
+  "Backhoe Loader (JCB)",
+  "Self-Loading Mixer (Ajax)",
+  "Tower Crane",
+  "Mobile Crane",
+  "Batching Plant",
+  "Concrete Pump",
+  "Concrete Boom Placer",
+]);
+
 export const MACHINE_TYPES = [
   "Excavator",
   "Backhoe Loader (JCB)",
