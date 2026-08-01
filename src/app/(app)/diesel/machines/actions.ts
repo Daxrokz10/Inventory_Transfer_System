@@ -57,6 +57,10 @@ export async function addMachine(
   if (ownership === "external" && !vendor_name) {
     return "Vendor name is required for external (hired) machines.";
   }
+  if (ownership === "external") {
+    const internalError = await checkNotActuallyInternal(supabase, registration_no, vendor_name);
+    if (internalError) return internalError;
+  }
   // Starting reading only matters when a reading is tracked at all. Must be
   // a real, positive reading — a placeholder 0 here is what makes a
   // machine's first daily report compute an impossible efficiency (its
@@ -95,6 +99,50 @@ export async function addMachine(
   revalidatePath("/diesel/machines");
   revalidatePath("/diesel");
   return null;
+}
+
+const norm = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+// "Shree Ganesh Corporation" is SGC itself, not a real hire vendor — a
+// machine tagged with it as the vendor is company-owned wearing an
+// external label (as happened with the Ajax at J-0069). Catch that
+// mislabeling at the source: block it whether it shows up as the vendor
+// name being typed in now, or because the numberplate already exists on
+// an internal (or SGC-vendor) record somewhere else in the fleet.
+const SGC_VENDOR_RE = /SHREE\s*GANESH\s*CORPORATION/i;
+
+async function checkNotActuallyInternal(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  registration_no: string | null,
+  vendor_name: string | null,
+): Promise<string | null> {
+  if (vendor_name && SGC_VENDOR_RE.test(vendor_name)) {
+    return "This is an internal (company-owned) machine, not a hired one — the vendor can't be Shree Ganesh Corporation. Only an admin can add internal machinery.";
+  }
+  if (!registration_no) return null;
+
+  const target = norm(registration_no);
+  const { data: candidates } = await supabase
+    .from("machines")
+    .select("registration_no, ownership, vendor_name, project_id, is_active")
+    .not("registration_no", "is", null);
+
+  const match = (candidates ?? []).find(
+    (m) => m.is_active && m.registration_no && norm(m.registration_no) === target,
+  );
+  if (!match) return null;
+
+  const isInternal = match.ownership === "internal" || SGC_VENDOR_RE.test(match.vendor_name ?? "");
+  if (!isInternal) return null;
+
+  const { data: project } = await supabase
+    .from("projects")
+    .select("name, code")
+    .eq("id", match.project_id)
+    .single();
+  const site = project ? `${project.code ? `${project.code} · ` : ""}${project.name}` : "another site";
+
+  return `This machine is internal (company-owned), currently at ${site} — you can only add hired (external) machines. Ask an admin to transfer it here instead.`;
 }
 
 async function loadMachine(

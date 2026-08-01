@@ -493,9 +493,9 @@ export default async function DieselPage({
         <Card className="p-0">
           <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
             <div>
-              <h2 className="text-sm font-semibold">Diesel received</h2>
+              <h2 className="text-sm font-semibold">Fuel received</h2>
               <p className="text-xs text-ink-3">
-                Record a barrel / delivery arriving on site — separate from the fuel logged to machines above
+                Record a barrel / delivery arriving on site (diesel or petrol) — separate from the fuel logged to machines above
               </p>
             </div>
             {homeProjectId && <FuelReceiptForm projectId={homeProjectId} today={today} />}
@@ -505,6 +505,9 @@ export default async function DieselPage({
               {receipts.map((r) => (
                 <li key={r.id} className="flex items-center justify-between gap-3 px-5 py-2.5 text-sm">
                   <span className="text-ink-2">
+                    <Badge tone={r.fuel_type === "petrol" ? "warn" : "neutral"} className="mr-2 px-1.5 py-0 text-[10px] uppercase">
+                      {r.fuel_type}
+                    </Badge>
                     <span className="font-mono tabular-nums text-ink">{Number(r.liters).toFixed(0)} L</span>
                     {r.barrels ? ` · ${r.barrels} barrel${r.barrels === 1 ? "" : "s"}` : ""} ·{" "}
                     {r.receipt_date}

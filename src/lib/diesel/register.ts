@@ -77,18 +77,23 @@ export async function buildDieselRegister(
 
   // Fetch EVERYTHING up to the range end (no lower bound) so the running
   // balance reflects all prior movements; the range only controls what's
-  // listed. INWARD — barrels received.
+  // listed. INWARD — barrels received. This ledger is diesel-only — a
+  // petrol receipt is a separate fuel stock and would otherwise silently
+  // inflate this balance.
   const { data: receiptsRaw } = await supabase
     .from("fuel_receipts")
     .select("receipt_date, liters, rate_per_liter, total_cost, vendor, note")
     .eq("project_id", projectId)
+    .eq("fuel_type", "diesel")
     .lte("receipt_date", range.end);
 
-  // OUTWARD — diesel issued to machines. Join the machine for name/plate/owner.
+  // OUTWARD — diesel issued to machines. Join the machine for
+  // name/plate/owner/fuel — a petrol-fueled machine's log never touched
+  // this site's diesel stock, so it's excluded below rather than counted.
   const { data: logsRaw } = await supabase
     .from("daily_logs")
     .select(
-      "log_date, fuel_issued_liters, opening_reading, closing_reading, fuel_source, machines(name, registration_no, ownership, vendor_name)",
+      "log_date, fuel_issued_liters, opening_reading, closing_reading, fuel_source, machines(name, registration_no, ownership, vendor_name, fuel_type)",
     )
     .eq("project_id", projectId)
     .gt("fuel_issued_liters", 0)
@@ -105,6 +110,7 @@ export async function buildDieselRegister(
       registration_no: string | null;
       ownership: "internal" | "external";
       vendor_name: string | null;
+      fuel_type: "diesel" | "petrol";
     } | null;
   };
 
@@ -133,29 +139,31 @@ export async function buildDieselRegister(
     note: r.note,
   }));
 
-  const outward: RegisterRow[] = ((logsRaw ?? []) as unknown as LogRow[]).map((l) => {
-    const m = l.machines;
-    const owner = m?.ownership === "external" ? (m.vendor_name ?? "Hired") : "SGC";
-    return {
-      date: l.log_date,
-      type: "OUTWARD" as const,
-      subGroup: (m?.ownership === "external" ? "EXTERNAL" : "INTERNAL") as
-        | "INTERNAL"
-        | "EXTERNAL",
-      party: owner,
-      machine: m?.name ?? "—",
-      assetCode: m?.registration_no ?? "",
-      liters: Number(l.fuel_issued_liters),
-      rate: null,
-      amount: null,
-      startReading: l.opening_reading != null ? Number(l.opening_reading) : null,
-      endReading: l.closing_reading != null ? Number(l.closing_reading) : null,
-      meterBroken: l.closing_reading == null,
-      fuelSource: l.fuel_source,
-      runningBalance: 0,
-      note: null,
-    };
-  });
+  const outward: RegisterRow[] = ((logsRaw ?? []) as unknown as LogRow[])
+    .filter((l) => (l.machines?.fuel_type ?? "diesel") === "diesel")
+    .map((l) => {
+      const m = l.machines;
+      const owner = m?.ownership === "external" ? (m.vendor_name ?? "Hired") : "SGC";
+      return {
+        date: l.log_date,
+        type: "OUTWARD" as const,
+        subGroup: (m?.ownership === "external" ? "EXTERNAL" : "INTERNAL") as
+          | "INTERNAL"
+          | "EXTERNAL",
+        party: owner,
+        machine: m?.name ?? "—",
+        assetCode: m?.registration_no ?? "",
+        liters: Number(l.fuel_issued_liters),
+        rate: null,
+        amount: null,
+        startReading: l.opening_reading != null ? Number(l.opening_reading) : null,
+        endReading: l.closing_reading != null ? Number(l.closing_reading) : null,
+        meterBroken: l.closing_reading == null,
+        fuelSource: l.fuel_source,
+        runningBalance: 0,
+        note: null,
+      };
+    });
 
   // Merge chronologically; inward before outward on the same date (barrels
   // land, then get issued). Then thread the running balance from opening.

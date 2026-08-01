@@ -39,6 +39,7 @@ export default async function DieselReportsPage({
   let receiptsQuery = supabase
     .from("fuel_receipts")
     .select("project_id, liters, total_cost")
+    .eq("fuel_type", "diesel")
     .gte("receipt_date", start)
     .lte("receipt_date", end);
   if (siteFilter) receiptsQuery = receiptsQuery.eq("project_id", siteFilter);

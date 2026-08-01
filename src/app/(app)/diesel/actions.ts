@@ -250,6 +250,7 @@ export async function addFuelReceipt(
   const rateRaw = String(formData.get("rate_per_liter") ?? "").trim();
   const vendor = String(formData.get("vendor") ?? "").trim() || null;
   const note = String(formData.get("note") ?? "").trim() || null;
+  const fuel_type = String(formData.get("fuel_type") ?? "diesel").trim();
 
   if (!project_id) return "Missing site.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(receipt_date)) return "Pick a valid date.";
@@ -257,9 +258,13 @@ export async function addFuelReceipt(
     return "The receipt date cannot be in the future.";
   }
   if (!(liters > 0)) return "Enter how many liters were received.";
+  if (fuel_type !== "diesel" && fuel_type !== "petrol") {
+    return "Choose the fuel received (diesel or petrol).";
+  }
 
   // Rate: manual override if given, else the day's API market rate for the
-  // site's state. total_cost only when a rate is known.
+  // site's state, for whichever fuel was received. total_cost only when a
+  // rate is known.
   let rate: number | null = rateRaw !== "" ? Number(rateRaw) : null;
   if (rate == null || !(rate > 0)) {
     const { data: project } = await supabase
@@ -268,7 +273,7 @@ export async function addFuelReceipt(
       .eq("id", project_id)
       .single();
     const prices = await getPricesForCity(cityForState(project?.state ?? null), receipt_date);
-    rate = prices.diesel;
+    rate = fuel_type === "petrol" ? prices.petrol : prices.diesel;
   }
   const total_cost = rate != null ? Number((rate * liters).toFixed(2)) : null;
 
@@ -276,6 +281,7 @@ export async function addFuelReceipt(
     project_id,
     receipt_date,
     liters,
+    fuel_type,
     barrels: barrelsRaw !== "" ? Number(barrelsRaw) : null,
     rate_per_liter: rate,
     total_cost,

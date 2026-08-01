@@ -3,12 +3,12 @@
 import { useState, useActionState } from "react";
 import { addFuelReceipt } from "./actions";
 import { Button } from "@/components/ui/Button";
-import { Field, Input } from "@/components/ui/Field";
+import { Field, Input, Select } from "@/components/ui/Field";
 
-// Record a barrel / diesel delivery arriving at this site. Liters is the
-// only required field; the rate defaults to the day's market price unless a
-// "rate paid" is entered. Kept collapsed until opened so it doesn't crowd
-// the daily sheet.
+// Record a barrel / fuel delivery (diesel or petrol) arriving at this site.
+// Liters is the only required field; the rate defaults to the day's market
+// price for whichever fuel is picked, unless a "rate paid" is entered. Kept
+// collapsed until opened so it doesn't crowd the daily sheet.
 export function FuelReceiptForm({
   projectId,
   today,
@@ -29,7 +29,7 @@ export function FuelReceiptForm({
   if (!open) {
     return (
       <Button variant="secondary" size="sm" onClick={() => setOpen(true)}>
-        + Record diesel received
+        + Record fuel received
       </Button>
     );
   }
@@ -38,7 +38,7 @@ export function FuelReceiptForm({
     <form action={formAction} className="space-y-3 rounded-lg border border-line bg-surface-2 p-4">
       <input type="hidden" name="project_id" value={projectId} />
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-ink">Diesel received</h3>
+        <h3 className="text-sm font-semibold text-ink">Fuel received</h3>
         <button
           type="button"
           onClick={() => setOpen(false)}
@@ -49,6 +49,12 @@ export function FuelReceiptForm({
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <Field label="Fuel">
+          <Select name="fuel_type" required defaultValue="diesel">
+            <option value="diesel">Diesel</option>
+            <option value="petrol">Petrol</option>
+          </Select>
+        </Field>
         <Field label="Date">
           <Input type="date" name="receipt_date" defaultValue={today} max={today} required />
         </Field>
