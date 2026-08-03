@@ -38,6 +38,13 @@ export function NewMachineButton({
   const meterFixed = HOURS_METERED_TYPES.has(machineType);
   const [trackFuel, setTrackFuel] = useState(true);
   const [trackMeter, setTrackMeter] = useState(true);
+  const [currentReading, setCurrentReading] = useState("");
+  const [meterBroken, setMeterBroken] = useState(false);
+  // A starting reading this low is almost always a placeholder/typo, not a
+  // real lifetime reading — flag it instead of silently accepting it and
+  // producing an impossible efficiency on the first daily report.
+  const readingSuspiciouslyLow =
+    !meterBroken && currentReading.trim() !== "" && Number(currentReading) <= 1;
   const [error, formAction, pending] = useActionState(addMachine, null);
 
   if (!open) {
@@ -170,19 +177,56 @@ export function NewMachineButton({
             <Field
               label={readingType === "hours" ? "Starting reading (hours)" : "Starting reading (km)"}
               hint={
-                readingType === "hours"
-                  ? "Current lifetime hour-meter reading — the only time this is typed in; every daily report after this carries it forward automatically"
-                  : "Current odometer reading (km) — the only time this is typed in; every daily report after this carries it forward automatically"
+                meterBroken
+                  ? undefined
+                  : readingType === "hours"
+                    ? "Current lifetime hour-meter reading — the only time this is typed in; every daily report after this carries it forward automatically"
+                    : "Current odometer reading (km) — the only time this is typed in; every daily report after this carries it forward automatically"
               }
             >
+              <input type="hidden" name="meter_broken" value={meterBroken ? "true" : ""} />
               <Input
                 name="current_reading"
                 type="number"
                 step="0.1"
                 min="0.1"
-                required
+                required={!meterBroken}
+                disabled={meterBroken}
+                value={currentReading}
+                onChange={(e) => setCurrentReading(e.target.value)}
                 placeholder={readingType === "hours" ? "e.g. 4500 hours" : "e.g. 32000 km"}
+                className={readingSuspiciouslyLow ? "border-danger text-danger" : undefined}
               />
+              {readingSuspiciouslyLow && (
+                <div className="mt-1.5 flex items-center justify-between gap-2 rounded-md bg-danger-soft px-2 py-1.5">
+                  <p className="text-xs text-danger">
+                    That&apos;s a very low reading for a machine already in service — is the meter
+                    actually broken?
+                  </p>
+                  <button
+                    type="button"
+                    className="shrink-0 whitespace-nowrap rounded bg-danger px-2 py-1 text-xs font-semibold text-white"
+                    onClick={() => {
+                      setMeterBroken(true);
+                      setCurrentReading("");
+                    }}
+                  >
+                    Meter broken
+                  </button>
+                </div>
+              )}
+              {meterBroken && (
+                <div className="mt-1.5 flex items-center justify-between gap-2 rounded-md bg-danger-soft px-2 py-1.5">
+                  <p className="text-xs text-danger">Registering with meter broken — no starting reading needed.</p>
+                  <button
+                    type="button"
+                    className="shrink-0 whitespace-nowrap text-xs font-medium text-danger underline"
+                    onClick={() => setMeterBroken(false)}
+                  >
+                    Undo
+                  </button>
+                </div>
+              )}
             </Field>
           )}
           <Field label="Tank capacity (L)" hint="Optional — enables over-fill checks">

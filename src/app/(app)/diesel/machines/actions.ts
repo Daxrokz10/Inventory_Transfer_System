@@ -33,6 +33,7 @@ export async function addMachine(
   const capacityRaw = get("tank_capacity_liters");
   const monthlyRentRaw = get("monthly_rent");
   const readingRaw = get("current_reading");
+  const meter_broken = formData.get("meter_broken") === "true";
   const track_fuel = formData.get("track_fuel") != null;
   const track_meter = track_fuel || formData.get("track_meter") != null;
   const so_until = get("so_until"); // YYYY-MM-DD or null
@@ -61,11 +62,12 @@ export async function addMachine(
     const internalError = await checkNotActuallyInternal(supabase, registration_no, vendor_name);
     if (internalError) return internalError;
   }
-  // Starting reading only matters when a reading is tracked at all. Must be
-  // a real, positive reading — a placeholder 0 here is what makes a
-  // machine's first daily report compute an impossible efficiency (its
-  // entire life-to-date distance divided into one day's fuel).
-  if (track_meter && (readingRaw == null || Number(readingRaw) <= 0)) {
+  // Starting reading only matters when a reading is tracked at all AND the
+  // meter isn't already flagged broken at registration. Must be a real,
+  // positive reading — a placeholder 0 here is what makes a machine's
+  // first daily report compute an impossible efficiency (its entire
+  // life-to-date distance divided into one day's fuel).
+  if (track_meter && !meter_broken && (readingRaw == null || Number(readingRaw) <= 0)) {
     return "A real starting reading is required (not 0) — this is the only time it's typed in manually, and every day after carries it forward automatically.";
   }
 
@@ -82,8 +84,9 @@ export async function addMachine(
     tank_capacity_liters: capacityRaw == null ? null : Number(capacityRaw),
     track_fuel,
     track_meter,
-    current_reading: track_meter ? Number(readingRaw) : null,
-    current_reading_at: track_meter ? new Date().toISOString() : null,
+    meter_broken,
+    current_reading: track_meter && !meter_broken ? Number(readingRaw) : null,
+    current_reading_at: track_meter && !meter_broken ? new Date().toISOString() : null,
     deployed_at: new Date().toISOString().slice(0, 10),
     so_until,
     created_by: user.id,

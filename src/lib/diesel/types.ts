@@ -180,6 +180,7 @@ export const HOURS_METERED_TYPES = new Set<string>([
   "Batching Plant",
   "Concrete Pump",
   "Concrete Boom Placer",
+  "Transit Mixer",
 ]);
 
 export const MACHINE_TYPES = [

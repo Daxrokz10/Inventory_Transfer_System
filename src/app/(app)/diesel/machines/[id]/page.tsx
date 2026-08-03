@@ -8,13 +8,9 @@ import { StatusPill, NotMetered } from "@/components/ui/states";
 import { soStatus, type Machine, type DailyLog, type AnomalyFlag } from "@/lib/diesel/types";
 import { computeFillMetrics } from "@/lib/diesel/efficiency";
 import { EfficiencyChart, type EfficiencyPoint } from "../../EfficiencyChart";
+import { LogHistoryRow } from "./LogHistoryRow";
 
-const inr = (n: number) =>
-  new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0,
-  }).format(n);
+const SOLE_EDITOR_ID = "86091b08-3c52-4650-a55f-de1890e36415";
 
 const SEVERITY_TONE: Record<string, "neutral" | "warn" | "danger"> = {
   low: "neutral",
@@ -37,6 +33,7 @@ export default async function MachineDetailPage({
     ? await supabase.from("profiles").select("role").eq("id", user.id).single()
     : { data: null };
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const canEdit = user?.id === SOLE_EDITOR_ID;
 
   // RLS already scopes this to admin-any-site or supervisor-own-site — a
   // machine outside the caller's reach simply comes back null, same as a
@@ -290,54 +287,14 @@ export default async function MachineDetailPage({
                 </TD>
               </tr>
             ) : (
-              logs.slice(0, 100).map((l) => {
-                const metric = metricByLogId.get(l.id);
-                return (
-                  <TRow key={l.id}>
-                    <TD className="whitespace-nowrap">{l.log_date}</TD>
-                    <TD>
-                      {l.status === "normal" ? (
-                        <StatusPill tone="ok">Reported</StatusPill>
-                      ) : (
-                        <StatusPill tone="caution">
-                          {l.status === "breakdown" ? "Broken down" : "Under maintenance"}
-                        </StatusPill>
-                      )}
-                    </TD>
-                    <TD className="text-right font-mono tabular-nums">{l.opening_reading ?? "—"}</TD>
-                    <TD className="text-right font-mono tabular-nums">{l.closing_reading ?? "—"}</TD>
-                    <TD className="text-right font-mono tabular-nums">
-                      {Number(l.fuel_issued_liters).toFixed(1)}
-                      {l.fuel_source && l.fuel_source !== "on_site" && (
-                        <span className="ml-1 rounded bg-surface-2 px-1 py-0.5 font-sans text-[10px] uppercase tracking-wide text-ink-3">
-                          {l.fuel_source === "shraddha" ? "Shraddha" : "offsite"}
-                        </span>
-                      )}
-                    </TD>
-                    <TD className="text-right font-mono tabular-nums text-ink-2">
-                      {metric ? (
-                        <>
-                          {metric.value.toFixed(2)} {metric.unit}
-                          {metric.provisional && (
-                            <span
-                              className="ml-1 text-[10px] text-ink-3"
-                              title="No later fill yet to close this one out — estimate using the current reading"
-                            >
-                              so far
-                            </span>
-                          )}
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </TD>
-                    <TD className="text-right font-mono tabular-nums">
-                      {l.total_cost != null ? inr(Number(l.total_cost)) : "—"}
-                    </TD>
-                    <TD className="max-w-56 truncate text-ink-2">{l.remarks ?? "—"}</TD>
-                  </TRow>
-                );
-              })
+              logs.slice(0, 100).map((l) => (
+                <LogHistoryRow
+                  key={l.id}
+                  log={l}
+                  metric={metricByLogId.get(l.id) ?? null}
+                  canEdit={canEdit}
+                />
+              ))
             )}
           </tbody>
         </Table>
