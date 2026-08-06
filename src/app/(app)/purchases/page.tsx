@@ -21,12 +21,13 @@ export default async function PurchasesPage() {
       .from("items")
       .select("id, code, description, unit, sub_group, per_day_rate")
       .order("code"),
-    supabase.from("projects").select("id, code, name").order("code"),
+    supabase.from("projects").select("id, code, name, is_active").order("code"),
   ]);
 
   const purchaseProject = (projects ?? []).find((p) => p.code === PURCHASE_CODE);
-  // Real destination sites exclude the reserved purchase source.
-  const destinations = (projects ?? []).filter((p) => p.code !== PURCHASE_CODE);
+  // Destination picker: exclude the reserved purchase source and inactive (deleted) sites.
+  // projMap stays unfiltered so historical rows for now-inactive sites still resolve.
+  const destinations = (projects ?? []).filter((p) => p.code !== PURCHASE_CODE && p.is_active !== false);
   const projMap = new Map((projects ?? []).map((p) => [p.id, p]));
   const itemMap = new Map((items ?? []).map((i) => [i.id, i]));
 

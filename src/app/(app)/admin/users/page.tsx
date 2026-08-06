@@ -42,7 +42,7 @@ export default async function UsersPage() {
       .from("profiles")
       .select("id, full_name, role, home_project_id, project:home_project_id(code, name)")
       .order("full_name"),
-    supabase.from("projects").select("id, code, name").order("code"),
+    supabase.from("projects").select("id, code, name").eq("is_active", true).order("code"),
   ]);
 
   type ProfileRow = {

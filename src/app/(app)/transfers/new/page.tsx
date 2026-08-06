@@ -9,7 +9,7 @@ export default async function NewTransferPage() {
 
   const [{ data: projects }, { data: items }, { data: profile }] =
     await Promise.all([
-      supabase.from("projects").select("id, code, name").order("code"),
+      supabase.from("projects").select("id, code, name").eq("is_active", true).order("code"),
       supabase
         .from("items")
         .select("id, code, description, unit, per_day_rate, sub_group")
