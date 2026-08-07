@@ -67,7 +67,7 @@ export function OpeningStockForm({
           <Input
             type="number"
             name="liters"
-            step="0.1"
+            step="0.01"
             min="0"
             required
             defaultValue={current?.liters ?? ""}

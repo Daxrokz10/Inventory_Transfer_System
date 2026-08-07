@@ -59,7 +59,7 @@ export function FuelReceiptForm({
           <Input type="date" name="receipt_date" defaultValue={today} max={today} required />
         </Field>
         <Field label="Liters received">
-          <Input type="number" name="liters" step="0.1" min="0" required placeholder="e.g. 200" />
+          <Input type="number" name="liters" step="0.01" min="0" required placeholder="e.g. 200" />
         </Field>
         <Field label="Barrels" hint="Optional — number of drums">
           <Input type="number" name="barrels" step="1" min="0" placeholder="e.g. 1" />

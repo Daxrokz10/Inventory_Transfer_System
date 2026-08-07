@@ -106,7 +106,7 @@ export function EditMachineForm({
             <Input
               name="current_reading"
               type="number"
-              step="0.1"
+              step="0.01"
               min="0"
               defaultValue={machine.current_reading ?? ""}
             />

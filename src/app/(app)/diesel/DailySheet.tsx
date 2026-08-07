@@ -275,7 +275,7 @@ export function DailySheet({
                     ) : (
                       <Input
                         type="number"
-                        step="0.1"
+                        step="0.01"
                         min="0"
                         value={r.reading}
                         onChange={(e) => set(m.id, { reading: e.target.value })}

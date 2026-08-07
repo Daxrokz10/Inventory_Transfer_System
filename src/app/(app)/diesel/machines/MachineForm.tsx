@@ -188,7 +188,7 @@ export function NewMachineButton({
               <Input
                 name="current_reading"
                 type="number"
-                step="0.1"
+                step="0.01"
                 min="0.1"
                 required={!meterBroken}
                 disabled={meterBroken}
@@ -230,7 +230,7 @@ export function NewMachineButton({
             </Field>
           )}
           <Field label="Tank capacity (L)" hint="Optional — enables over-fill checks">
-            <Input name="tank_capacity_liters" type="number" step="0.1" min="0" />
+            <Input name="tank_capacity_liters" type="number" step="0.01" min="0" />
           </Field>
           {ownership === "external" && (
             <>
