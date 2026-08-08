@@ -48,7 +48,14 @@ export interface DieselSnapshot {
   isEmpty: boolean;
 }
 
-const DEFAULT_MAX_MACHINES = 30;
+/* High enough to list every machine in a normal reporting window rather than
+   just the thirstiest. Ranking by fuel and cutting at 30 quietly excluded
+   exactly the vehicles an admin is most likely to ask about by name — a car
+   burns a fraction of what an excavator does, so it always sorted last, and
+   the assistant could only answer "no record of that machine", which reads as
+   the data being wrong rather than the snapshot being trimmed. A week of the
+   current fleet is ~130 machines and costs roughly 5k tokens. */
+const DEFAULT_MAX_MACHINES = 150;
 const DEFAULT_MAX_SITES = 12;
 const DEFAULT_MAX_FLAGS = 25;
 
@@ -124,6 +131,18 @@ export async function gatherDieselSnapshot(
     return { markdown: lines.join("\n"), isEmpty: true };
   }
 
+  /* Which of these machines an admin has flagged to keep an eye on. This is
+     admin-only information and the assistant is an admin-only surface, so it
+     belongs here — a flag that exists to focus attention is wasted if the
+     thing being asked for a summary can't see it. Queried separately rather
+     than widening fetchMonthlyReport, which also feeds the CSV export. */
+  const { data: flaggedRaw } = await supabase
+    .from("machines")
+    .select("id")
+    .eq("flagged_suspicious", true)
+    .in("id", rows.map((r) => r.machine_id));
+  const suspicious = new Set((flaggedRaw ?? []).map((m) => m.id as string));
+
   // ---- Totals -------------------------------------------------------------
   const totalFuel = rows.reduce((s, r) => s + r.total_fuel, 0);
   const totalCost = rows.reduce((s, r) => s + r.total_cost, 0);
@@ -175,14 +194,19 @@ export async function gatherDieselSnapshot(
     }`,
   );
   lines.push(
-    "machine | site | fuel_L | cost_INR | total_run | average | days_reported",
+    'machine | site | fuel_L | cost_INR | total_run | average | days_reported | watch ("flagged" = an admin marked this machine for closer scrutiny)',
   );
-  for (const r of shown) lines.push(machineLine(r));
+  for (const r of shown) lines.push(machineLine(r, suspicious));
   if (machinesRanked.length > shown.length) {
     const rest = machinesRanked.slice(shown.length);
     const restFuel = rest.reduce((s, r) => s + r.total_fuel, 0);
+    // Named, not just counted. Without the names the assistant cannot tell
+    // "this machine doesn't exist" from "this machine is outside the listing",
+    // and would report the first when the truth is the second.
     lines.push(
-      `(${rest.length} further machines not listed individually, ${num(restFuel)} L between them)`,
+      `(${rest.length} further machines reported in this period but are not detailed above, ${num(restFuel)} L between them. If asked about one of these, say it reported but its detail was not included, and suggest narrowing the site filter: ${rest
+        .map((r) => sanitize(r.machine_name, 40))
+        .join("; ")})`,
     );
   }
   lines.push("");
@@ -246,7 +270,7 @@ export async function gatherDieselSnapshot(
   return { markdown: lines.join("\n"), isEmpty: false };
 }
 
-function machineLine(r: MonthlyReportRow): string {
+function machineLine(r: MonthlyReportRow, suspicious: Set<string>): string {
   const run = rowTotalRun(r);
   const avg = rowAverage(r);
   const unit = r.reading_type === "hours" ? "hr" : "km";
@@ -262,6 +286,7 @@ function machineLine(r: MonthlyReportRow): string {
     run != null ? `${num(run)} ${unit}` : "no reading",
     avg != null ? `${avg.toFixed(2)} ${avgUnit}` : "not computable",
     String(r.days_reported),
+    suspicious.has(r.machine_id) ? "flagged" : "",
   ].join(" | ");
 }
 
