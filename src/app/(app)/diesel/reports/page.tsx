@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Field";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { fetchMonthlyReport, rowAverage, rowTotalRun } from "@/lib/diesel/monthlyReport";
+import { isLlmConfigured } from "@/lib/llm/client";
+import { AiSummary } from "./AiSummary";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -153,6 +155,10 @@ export default async function DieselReportsPage({
           </p>
         </Card>
       </div>
+
+      {isLlmConfigured && rows.length > 0 && (
+        <AiSummary start={start} end={end} site={siteFilter} />
+      )}
 
       <Card className="overflow-x-auto p-0">
         <Table>

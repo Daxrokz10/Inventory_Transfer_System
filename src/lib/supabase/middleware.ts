@@ -41,9 +41,15 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const publicPaths = ["/login", "/auth"];
-  const isPublic = publicPaths.some((p) =>
-    request.nextUrl.pathname.startsWith(p),
-  );
+  // Routes that authenticate themselves and legitimately arrive without a
+  // session cookie. /api/diesel/monitor is called by the platform's cron, not
+  // a browser — it checks a bearer secret of its own and 401s without it, so
+  // skipping the session gate here opens nothing up. Session-gating it would
+  // simply redirect every nightly run to the login page.
+  const selfAuthedPaths = ["/api/diesel/monitor"];
+  const isPublic =
+    publicPaths.some((p) => request.nextUrl.pathname.startsWith(p)) ||
+    selfAuthedPaths.some((p) => request.nextUrl.pathname === p);
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

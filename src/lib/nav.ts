@@ -55,6 +55,7 @@ const dieselAdminNav: NavItem[] = [
   { href: "/diesel/reports", label: "Reports" },
   { href: "/diesel/sites", label: "Sites" },
   { href: "/diesel/visualization", label: "Visualization" },
+  { href: "/diesel/assistant", label: "Assistant" },
 ];
 
 export function navFor(module: ModuleKey, isAdmin: boolean): NavItem[] {
