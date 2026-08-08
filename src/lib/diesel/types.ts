@@ -36,6 +36,10 @@ export interface Machine {
   /** Set by a site supervisor when the physical odometer/hour-meter
       fails. Only an admin can clear it — see set_meter_broken() RPC. */
   meter_broken: boolean;
+  /** Admin-only flag for "keep an eye on this one" — no formal meaning,
+      just a way to mark a machine for closer scrutiny. Never shown to
+      non-admins. */
+  flagged_suspicious: boolean;
 }
 
 export type SoStatus =

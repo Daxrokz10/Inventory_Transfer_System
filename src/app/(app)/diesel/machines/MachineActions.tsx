@@ -6,6 +6,7 @@ import {
   deleteMachine,
   reactivateMachine,
   setMeterBroken,
+  setSuspicious,
   transferMachine,
 } from "./actions";
 import { Input } from "@/components/ui/Field";
@@ -48,6 +49,7 @@ function MenuFormItem({
   danger,
   onDone,
   children,
+  extraFields,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   machineId: string;
@@ -55,6 +57,7 @@ function MenuFormItem({
   danger?: boolean;
   onDone: () => void;
   children: React.ReactNode;
+  extraFields?: Record<string, string>;
 }) {
   return (
     <form
@@ -68,6 +71,10 @@ function MenuFormItem({
       }}
     >
       <input type="hidden" name="machine_id" value={machineId} />
+      {extraFields &&
+        Object.entries(extraFields).map(([k, v]) => (
+          <input key={k} type="hidden" name={k} value={v} />
+        ))}
       <button
         type="submit"
         className={cn(
@@ -238,6 +245,22 @@ export function MeterBrokenControl({
   );
 }
 
+// Admin-only toggle for the "keep an eye on this one" flag — used on the
+// machine detail page, next to MeterBrokenControl's style.
+export function SuspiciousControl({ machine, isAdmin }: { machine: Machine; isAdmin: boolean }) {
+  if (!isAdmin) return null;
+
+  return (
+    <form action={setSuspicious}>
+      <input type="hidden" name="machine_id" value={machine.id} />
+      <input type="hidden" name="suspicious" value={machine.flagged_suspicious ? "false" : "true"} />
+      <button type="submit" className="text-xs text-ink-3 underline decoration-dotted underline-offset-2 hover:text-ink">
+        {machine.flagged_suspicious ? "Unmark suspicious" : "Mark suspicious"}
+      </button>
+    </form>
+  );
+}
+
 // Admin actions for a machine, collapsed into one kebab menu so the table
 // row stays tidy. The menu is fixed-positioned (anchored to the trigger)
 // so it escapes the table's horizontal-scroll clipping.
@@ -316,6 +339,15 @@ export function MachineActions({
             >
               Edit
             </MenuItem>
+
+            <MenuFormItem
+              action={setSuspicious}
+              machineId={machine.id}
+              extraFields={{ suspicious: machine.flagged_suspicious ? "false" : "true" }}
+              onDone={closeMenu}
+            >
+              {machine.flagged_suspicious ? "Unmark suspicious" : "Mark suspicious"}
+            </MenuFormItem>
 
             {machine.is_active ? (
               <>

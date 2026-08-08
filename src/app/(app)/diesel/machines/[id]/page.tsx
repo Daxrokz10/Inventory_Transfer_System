@@ -9,6 +9,7 @@ import { soStatus, type Machine, type DailyLog, type AnomalyFlag } from "@/lib/d
 import { computeFillMetrics } from "@/lib/diesel/efficiency";
 import { EfficiencyChart, type EfficiencyPoint } from "../../EfficiencyChart";
 import { LogHistoryRow } from "./LogHistoryRow";
+import { SuspiciousControl } from "../MachineActions";
 
 const SOLE_EDITOR_ID = "86091b08-3c52-4650-a55f-de1890e36415";
 
@@ -165,6 +166,7 @@ export default async function MachineDetailPage({
           <CardLabel>Status</CardLabel>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {!machine.is_active && <Badge tone="neutral">Inactive</Badge>}
+            {isAdmin && machine.flagged_suspicious && <Badge tone="danger">Suspicious</Badge>}
             {machine.meter_broken && <StatusPill tone="alarm">Meter broken</StatusPill>}
             {so.state === "expired" && (
               <StatusPill tone="alarm">SO expired · {so.days}d over</StatusPill>
@@ -174,6 +176,11 @@ export default async function MachineDetailPage({
               <StatusPill tone="ok">Normal</StatusPill>
             )}
           </div>
+          {isAdmin && (
+            <div className="mt-2">
+              <SuspiciousControl machine={machine} isAdmin={isAdmin} />
+            </div>
+          )}
         </Card>
         <Card>
           <CardLabel>Trend (last 2 weeks)</CardLabel>

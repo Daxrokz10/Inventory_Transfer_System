@@ -464,6 +464,26 @@ export async function setMeterBroken(formData: FormData): Promise<void> {
   revalidatePath("/diesel");
 }
 
+// Admin-only: mark/unmark a machine for closer scrutiny. No formal
+// meaning — just a way for an admin to flag one to keep an eye on.
+export async function setSuspicious(formData: FormData): Promise<void> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  if (!(await isCallerAdmin(supabase, user.id))) return;
+
+  const machine_id = String(formData.get("machine_id") ?? "");
+  const suspicious = formData.get("suspicious") === "true";
+  if (!machine_id) return;
+
+  await supabase.from("machines").update({ flagged_suspicious: suspicious }).eq("id", machine_id);
+
+  revalidatePath("/diesel/machines");
+  revalidatePath(`/diesel/machines/${machine_id}`);
+}
+
 // Admin-only: move an internal machine to a different site. Same machine
 // record, same history — just relocated, instead of deleting and
 // re-registering it (which would lose everything).

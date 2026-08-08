@@ -33,11 +33,10 @@ export function monthRange(month: string): { start: string; end: string } {
 
 export async function fetchMonthlyReport(
   supabase: SupabaseClient,
-  month: string,
+  start: string,
+  end: string,
   siteFilter: string | null,
 ): Promise<MonthlyReportRow[]> {
-  const { start, end } = monthRange(month);
-
   let query = supabase
     .from("daily_logs")
     .select("machine_id, project_id, log_date, opening_reading, closing_reading, fuel_issued_liters, total_cost, fuel_source")
@@ -118,6 +117,22 @@ export async function fetchMonthlyReport(
   );
 }
 
+/** Distance/hours covered across the whole range (closing − opening), or
+    null if either end is missing or the machine went backwards. */
+export function rowTotalRun(r: MonthlyReportRow): number | null {
+  if (r.opening_reading == null || r.closing_reading == null) return null;
+  const run = r.closing_reading - r.opening_reading;
+  return run > 0 ? run : null;
+}
+
+/** Average efficiency over the range — km/L for odometer machines,
+    L/hr for hour-metered ones — or null if there's not enough data. */
+export function rowAverage(r: MonthlyReportRow): number | null {
+  const run = rowTotalRun(r);
+  if (run == null || r.total_fuel <= 0) return null;
+  return r.reading_type === "hours" ? r.total_fuel / run : run / r.total_fuel;
+}
+
 function csvEscape(v: string | number): string {
   const s = String(v);
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -132,12 +147,16 @@ export function toCsv(rows: MonthlyReportRow[]): string {
     "Closing",
     "Fuel (L)",
     "Cost (INR)",
+    "Total run (km/hr)",
+    "Average (km/L or L/hr)",
     "Shraddha pump fuel (L)",
     "Shraddha pump cost (INR)",
     "Days reported",
   ];
   const lines = [header.join(",")];
   for (const r of rows) {
+    const total = rowTotalRun(r);
+    const avg = rowAverage(r);
     lines.push(
       [
         csvEscape(r.site_label),
@@ -147,6 +166,8 @@ export function toCsv(rows: MonthlyReportRow[]): string {
         csvEscape(r.closing_reading ?? ""),
         csvEscape(r.total_fuel.toFixed(2)),
         csvEscape(r.total_cost.toFixed(2)),
+        csvEscape(total != null ? total.toFixed(2) : ""),
+        csvEscape(avg != null ? avg.toFixed(2) : ""),
         csvEscape(r.shraddha_fuel.toFixed(2)),
         csvEscape(r.shraddha_cost.toFixed(2)),
         csvEscape(r.days_reported),

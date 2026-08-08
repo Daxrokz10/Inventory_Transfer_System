@@ -316,6 +316,11 @@ function GroupBlock({
                   asset
                 </span>
               )}
+              {isAdmin && m.flagged_suspicious && (
+                <Badge tone="danger" className="ml-2">
+                  Suspicious
+                </Badge>
+              )}
               {so.state === "expired" && (
                 <StatusPill tone="alarm" className="ml-2">
                   SO expired · {so.days}d over

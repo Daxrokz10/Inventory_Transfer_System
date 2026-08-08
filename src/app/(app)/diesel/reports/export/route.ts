@@ -21,17 +21,22 @@ export async function GET(req: NextRequest) {
   if (!isAdmin) return new Response("Forbidden", { status: 403 });
 
   const { searchParams } = new URL(req.url);
-  const month = searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const start = searchParams.get("start") || monthStart;
+  const end = searchParams.get("end") || today;
   const site = searchParams.get("site") || null;
-  if (!/^\d{4}-\d{2}$/.test(month)) return new Response("Invalid month", { status: 400 });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
+    return new Response("Invalid date range", { status: 400 });
+  }
 
-  const rows = await fetchMonthlyReport(supabase, month, site);
+  const rows = await fetchMonthlyReport(supabase, start, end, site);
   const csv = toCsv(rows);
 
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="diesel-report-${month}.csv"`,
+      "Content-Disposition": `attachment; filename="diesel-report-${start}_to_${end}.csv"`,
     },
   });
 }

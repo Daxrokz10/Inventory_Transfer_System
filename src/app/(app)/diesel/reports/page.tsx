@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Button } from "@/components/ui/Button";
 import { Input, Select } from "@/components/ui/Field";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
-import { fetchMonthlyReport, monthRange } from "@/lib/diesel/monthlyReport";
+import { fetchMonthlyReport, rowAverage, rowTotalRun } from "@/lib/diesel/monthlyReport";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -18,7 +18,7 @@ const inr = (n: number) =>
 export default async function DieselReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; site?: string }>;
+  searchParams: Promise<{ start?: string; end?: string; site?: string }>;
 }) {
   const sp = await searchParams;
   const supabase = await createClient();
@@ -32,10 +32,13 @@ export default async function DieselReportsPage({
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   if (!isAdmin) redirect("/diesel");
 
-  const month = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? sp.month! : new Date().toISOString().slice(0, 7);
+  const today = new Date().toISOString().slice(0, 10);
+  const defaultStart = `${today.slice(0, 7)}-01`;
+  const isDate = (s?: string) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const start = isDate(sp.start) ? sp.start! : defaultStart;
+  const end = isDate(sp.end) ? sp.end! : today;
   const siteFilter = sp.site || null;
 
-  const { start, end } = monthRange(month);
   let receiptsQuery = supabase
     .from("fuel_receipts")
     .select("project_id, liters, total_cost")
@@ -46,7 +49,7 @@ export default async function DieselReportsPage({
 
   const [{ data: projects }, rows, { data: receiptsRaw }] = await Promise.all([
     supabase.from("projects").select("id, name, code").eq("is_active", true).order("name"),
-    fetchMonthlyReport(supabase, month, siteFilter),
+    fetchMonthlyReport(supabase, start, end, siteFilter),
     receiptsQuery,
   ]);
 
@@ -75,19 +78,23 @@ export default async function DieselReportsPage({
   }
   const orderedGroups = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
-  const exportHref = `/diesel/reports/export?month=${month}${siteFilter ? `&site=${siteFilter}` : ""}`;
+  const exportHref = `/diesel/reports/export?start=${start}&end=${end}${siteFilter ? `&site=${siteFilter}` : ""}`;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Monthly Diesel Report"
-        subtitle="Per-site, per-machine consumption for a calendar month — for the monthly submission"
+        title="Diesel Report"
+        subtitle="Per-site, per-machine consumption over a date range — for the monthly submission"
       />
 
       <form className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1 text-xs font-medium text-ink-2">
-          Month
-          <Input type="month" name="month" defaultValue={month} className="min-w-40" />
+          From
+          <Input type="date" name="start" defaultValue={start} max={end} className="min-w-40" />
+        </label>
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-2">
+          To
+          <Input type="date" name="end" defaultValue={end} min={start} max={today} className="min-w-40" />
         </label>
         <Select name="site" defaultValue={siteFilter ?? ""} className="min-w-48">
           <option value="">All sites</option>
@@ -110,7 +117,7 @@ export default async function DieselReportsPage({
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card>
-          <CardLabel>Fuel issued · {month}</CardLabel>
+          <CardLabel>Fuel issued · {start} to {end}</CardLabel>
           <p className="mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums">
             {grandFuel.toLocaleString("en-IN", { maximumFractionDigits: 0 })} L
           </p>
@@ -122,7 +129,7 @@ export default async function DieselReportsPage({
           )}
         </Card>
         <Card>
-          <CardLabel>Total cost · {month}</CardLabel>
+          <CardLabel>Total cost · {start} to {end}</CardLabel>
           <p className="mt-2 font-mono text-2xl font-semibold tracking-tight tabular-nums">
             {inr(grandCost)}
           </p>
@@ -154,7 +161,9 @@ export default async function DieselReportsPage({
               <TH>Machine</TH>
               <TH className="text-right">Opening</TH>
               <TH className="text-right">Closing</TH>
+              <TH className="text-right">Total run</TH>
               <TH className="text-right">Fuel (L)</TH>
+              <TH className="text-right">Average</TH>
               <TH className="text-right">Cost</TH>
               <TH className="text-right">Days reported</TH>
             </tr>
@@ -162,8 +171,8 @@ export default async function DieselReportsPage({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <TD colSpan={6}>
-                  <EmptyState message={`No daily reports for ${month} yet.`} />
+                <TD colSpan={8}>
+                  <EmptyState message={`No daily reports between ${start} and ${end} yet.`} />
                 </TD>
               </tr>
             ) : (
@@ -174,7 +183,7 @@ export default async function DieselReportsPage({
                 return (
                   <Fragment key={label}>
                     <tr className="bg-surface-2">
-                      <td colSpan={6} className="border-y border-line px-4 py-2 text-sm font-semibold text-ink">
+                      <td colSpan={8} className="border-y border-line px-4 py-2 text-sm font-semibold text-ink">
                         {label}
                         <span className="ml-2 text-xs font-normal text-ink-3">
                           {siteRows.length} machine{siteRows.length === 1 ? "" : "s"} ·{" "}
@@ -189,29 +198,41 @@ export default async function DieselReportsPage({
                         </span>
                       </td>
                     </tr>
-                    {siteRows.map((r) => (
-                      <TRow key={r.machine_id}>
-                        <TD>
-                          <span className="font-medium">{r.machine_name}</span>
-                          {r.registration_no && (
-                            <span className="text-ink-3"> · {r.registration_no}</span>
-                          )}
-                        </TD>
-                        <TD className="text-right font-mono tabular-nums">
-                          {r.opening_reading ?? "—"}
-                        </TD>
-                        <TD className="text-right font-mono tabular-nums">
-                          {r.closing_reading ?? "—"}
-                        </TD>
-                        <TD className="text-right font-mono tabular-nums">
-                          {r.total_fuel.toFixed(1)}
-                        </TD>
-                        <TD className="text-right font-mono tabular-nums">{inr(r.total_cost)}</TD>
-                        <TD className="text-right font-mono tabular-nums text-ink-2">
-                          {r.days_reported}
-                        </TD>
-                      </TRow>
-                    ))}
+                    {siteRows.map((r) => {
+                      const total = rowTotalRun(r);
+                      const avg = rowAverage(r);
+                      const unit = r.reading_type === "hours" ? "hr" : "km";
+                      const avgUnit = r.reading_type === "hours" ? "L/hr" : "km/L";
+                      return (
+                        <TRow key={r.machine_id}>
+                          <TD>
+                            <span className="font-medium">{r.machine_name}</span>
+                            {r.registration_no && (
+                              <span className="text-ink-3"> · {r.registration_no}</span>
+                            )}
+                          </TD>
+                          <TD className="text-right font-mono tabular-nums">
+                            {r.opening_reading ?? "—"}
+                          </TD>
+                          <TD className="text-right font-mono tabular-nums">
+                            {r.closing_reading ?? "—"}
+                          </TD>
+                          <TD className="text-right font-mono tabular-nums text-ink-2">
+                            {total != null ? `${total.toFixed(1)} ${unit}` : "—"}
+                          </TD>
+                          <TD className="text-right font-mono tabular-nums">
+                            {r.total_fuel.toFixed(1)}
+                          </TD>
+                          <TD className="text-right font-mono tabular-nums text-ink-2">
+                            {avg != null ? `${avg.toFixed(2)} ${avgUnit}` : "—"}
+                          </TD>
+                          <TD className="text-right font-mono tabular-nums">{inr(r.total_cost)}</TD>
+                          <TD className="text-right font-mono tabular-nums text-ink-2">
+                            {r.days_reported}
+                          </TD>
+                        </TRow>
+                      );
+                    })}
                   </Fragment>
                 );
               })
