@@ -58,6 +58,14 @@ export interface DieselSnapshot {
 const DEFAULT_MAX_MACHINES = 150;
 const DEFAULT_MAX_SITES = 12;
 const DEFAULT_MAX_FLAGS = 25;
+/** Window for the comparison average shown beside each period figure. */
+const BASELINE_DAYS = 90;
+
+function shiftDate(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
 
 /** Delimiter for the data block. The model is told everything between these
     markers is data, and the sanitizer guarantees no supervisor-typed text
@@ -131,6 +139,8 @@ export async function gatherDieselSnapshot(
     return { markdown: lines.join("\n"), isEmpty: true };
   }
 
+  const reportedIds = rows.map((r) => r.machine_id);
+
   /* Which of these machines an admin has flagged to keep an eye on. This is
      admin-only information and the assistant is an admin-only surface, so it
      belongs here — a flag that exists to focus attention is wasted if the
@@ -138,10 +148,38 @@ export async function gatherDieselSnapshot(
      than widening fetchMonthlyReport, which also feeds the CSV export. */
   const { data: flaggedRaw } = await supabase
     .from("machines")
-    .select("id")
+    .select("id, name, registration_no")
     .eq("flagged_suspicious", true)
-    .in("id", rows.map((r) => r.machine_id));
-  const suspicious = new Set((flaggedRaw ?? []).map((m) => m.id as string));
+    .in("id", reportedIds);
+  const flaggedMachines = (flaggedRaw ?? []) as {
+    id: string;
+    name: string;
+    registration_no: string | null;
+  }[];
+
+  /* Longer-run average per machine, so the period figure above can be read in
+     context rather than taken at face value. Same helper and same method as
+     the period figures — only the window differs — so the two are directly
+     comparable. One extra pass over daily_logs; worth it, because a period
+     average on its own is genuinely misleading for anything tank-fed. */
+  const baseline = new Map<string, number>();
+  try {
+    const baselineStart = shiftDate(opts.end, -BASELINE_DAYS);
+    const baselineRows = await fetchMonthlyReport(
+      supabase,
+      baselineStart,
+      opts.end,
+      opts.siteFilter,
+    );
+    for (const b of baselineRows) {
+      const avg = rowAverage(b);
+      if (avg != null) baseline.set(b.machine_id, avg);
+    }
+  } catch (err) {
+    // A missing baseline degrades the table to "no baseline", which is a
+    // worse answer but not a broken one.
+    console.error("Snapshot: baseline averages failed", err);
+  }
 
   // ---- Totals -------------------------------------------------------------
   const totalFuel = rows.reduce((s, r) => s + r.total_fuel, 0);
@@ -193,10 +231,23 @@ export async function gatherDieselSnapshot(
         : ""
     }`,
   );
+  /* The window average is boundary-sensitive and must be presented as such.
+     Distance is measured from the first opening to the last closing INSIDE the
+     period, but the fuel that propelled it may have been issued just before
+     the period began — so a vehicle filled the day before the range starts
+     looks far more efficient than it is. The baseline column is the same
+     calculation over a longer span, which is what makes the window figure
+     interpretable instead of alarming. */
   lines.push(
-    'machine | site | fuel_L | cost_INR | total_run | average | days_reported | watch ("flagged" = an admin marked this machine for closer scrutiny)',
+    "average = period distance / period fuel. baseline_average = the same over the last 90 days.",
   );
-  for (const r of shown) lines.push(machineLine(r, suspicious));
+  lines.push(
+    "If the two disagree sharply, the period is probably too short to judge by: a fill just before the period started inflates the period average, and a fill right at the end deflates it. Say so rather than reporting the period figure as this machine's efficiency.",
+  );
+  lines.push(
+    "machine | site | fuel_L | cost_INR | total_run | average | baseline_average | days_reported",
+  );
+  for (const r of shown) lines.push(machineLine(r, baseline));
   if (machinesRanked.length > shown.length) {
     const rest = machinesRanked.slice(shown.length);
     const restFuel = rest.reduce((s, r) => s + r.total_fuel, 0);
@@ -208,6 +259,28 @@ export async function gatherDieselSnapshot(
         .map((r) => sanitize(r.machine_name, 40))
         .join("; ")})`,
     );
+  }
+  lines.push("");
+
+  /* Its own section rather than a column on the table above. As a column it
+     was empty on almost every row, and a model scanning 130 pipe-delimited
+     lines reliably missed the two that were set — it reported a flagged
+     machine as "not flagged", which is worse than not showing the flag at
+     all. A short explicit list cannot be overlooked the same way. */
+  lines.push("## Machines an admin has flagged for closer scrutiny");
+  if (flaggedMachines.length === 0) {
+    lines.push(
+      "None of the machines reporting in this period are flagged.",
+    );
+  } else {
+    lines.push(
+      "These are marked for extra attention. The flag is a human judgement, not a computed result — it does not by itself mean anything is wrong.",
+    );
+    for (const f of flaggedMachines) {
+      lines.push(
+        `- ${sanitize(f.registration_no ? `${f.name} (${f.registration_no})` : f.name, 70)}`,
+      );
+    }
   }
   lines.push("");
 
@@ -270,11 +343,12 @@ export async function gatherDieselSnapshot(
   return { markdown: lines.join("\n"), isEmpty: false };
 }
 
-function machineLine(r: MonthlyReportRow, suspicious: Set<string>): string {
+function machineLine(r: MonthlyReportRow, baseline: Map<string, number>): string {
   const run = rowTotalRun(r);
   const avg = rowAverage(r);
   const unit = r.reading_type === "hours" ? "hr" : "km";
   const avgUnit = r.reading_type === "hours" ? "L/hr" : "km/L";
+  const base = baseline.get(r.machine_id);
   const label = r.registration_no
     ? `${r.machine_name} (${r.registration_no})`
     : r.machine_name;
@@ -285,8 +359,8 @@ function machineLine(r: MonthlyReportRow, suspicious: Set<string>): string {
     num(r.total_cost, 0),
     run != null ? `${num(run)} ${unit}` : "no reading",
     avg != null ? `${avg.toFixed(2)} ${avgUnit}` : "not computable",
+    base != null ? `${base.toFixed(2)} ${avgUnit}` : "no baseline",
     String(r.days_reported),
-    suspicious.has(r.machine_id) ? "flagged" : "",
   ].join(" | ");
 }
 
