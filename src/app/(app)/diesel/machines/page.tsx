@@ -6,7 +6,6 @@ import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { NotMetered, StatusPill } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
 import { soStatus, type Machine } from "@/lib/diesel/types";
-import { computeFillMetrics } from "@/lib/diesel/efficiency";
 import { NewMachineButton } from "./MachineForm";
 import { MachineActions, MeterBrokenControl } from "./MachineActions";
 import { MachineRequestButtons } from "./MachineRequestButtons";
@@ -92,7 +91,6 @@ export default async function MachinesPage({
       supabase
         .from("daily_logs")
         .select("id, machine_id, log_date, opening_reading, closing_reading, fuel_issued_liters")
-        .gt("fuel_issued_liters", 0)
         .gte("log_date", avgCutoff),
     ]);
 
@@ -102,9 +100,12 @@ export default async function MachinesPage({
   const siteCode = new Map(siteList.map((p) => [p.id, p.code]));
 
   // Current running average (last 90 days) per machine — km/L or L/hr,
-  // matching how the machine is metered. Each fill is attributed to the
-  // full distance/hours it covered through the NEXT fill (see
-  // efficiency.ts), not just its own day's movement.
+  // matching how the machine is metered. Total distance/hours covered
+  // over the window (earliest opening → latest known reading) divided by
+  // total fuel used, same whole-period method as the Reports page's
+  // "Average" column — not an average of individual fills, which can
+  // over/under-weight fills with little fuel or distance and silently
+  // drops any fill whose interval showed zero movement.
   type RecentLog = {
     id: string;
     machine_id: string;
@@ -121,10 +122,16 @@ export default async function MachinesPage({
   for (const m of machines) {
     const rows = logsByMachine.get(m.id);
     if (!rows || rows.length === 0) continue;
-    const vals = computeFillMetrics(m, rows, m.current_reading)
-      .filter((fm) => fm.plausible)
-      .map((fm) => fm.value);
-    if (vals.length > 0) runningAvg.set(m.id, vals.reduce((s, v) => s + v, 0) / vals.length);
+    const sorted = [...rows].sort((a, b) => (a.log_date < b.log_date ? -1 : a.log_date > b.log_date ? 1 : 0));
+    const opening = sorted.find((l) => l.opening_reading != null)?.opening_reading ?? null;
+    const lastClosing = [...sorted].reverse().find((l) => l.closing_reading != null)?.closing_reading ?? null;
+    const end = m.current_reading ?? lastClosing;
+    const totalFuel = sorted.reduce((s, l) => s + Number(l.fuel_issued_liters), 0);
+    if (opening == null || end == null || totalFuel <= 0) continue;
+    const distance = Number(end) - Number(opening);
+    if (distance <= 0) continue;
+    const value = m.reading_type === "hours" ? totalFuel / distance : distance / totalFuel;
+    runningAvg.set(m.id, value);
   }
   // machine_id → the type of its open request (if any).
   const pendingByMachine = new Map<string, "renewal" | "removal">(
