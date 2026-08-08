@@ -70,16 +70,17 @@ export async function askDieselAssistant(
 
   const snapshot = await gatherDieselSnapshot(supabase, { start, end, siteFilter: site });
 
-  // The snapshot goes in as a system message so it can't be mistaken for
-  // something the admin typed, and sits after the rules it's governed by.
+  // Rules and data go in as ONE system message, not two: Qwen's chat template
+  // (and several others) permit only a single system message at position zero
+  // and reject anything else outright. Keeping the data in the system role —
+  // rather than as a user turn — still means it can't be mistaken for
+  // something the admin typed.
+  const dataBlock = snapshot.isEmpty
+    ? `${snapshot.markdown}\n\nThere is no data for the selected period. Say so and suggest widening the date range.`
+    : snapshot.markdown;
+
   const messages: ChatMessage[] = [
-    { role: "system", content: DIESEL_SYSTEM_PROMPT },
-    {
-      role: "system",
-      content: snapshot.isEmpty
-        ? `${snapshot.markdown}\n\nThere is no data for the selected period. Say so and suggest widening the date range.`
-        : snapshot.markdown,
-    },
+    { role: "system", content: `${DIESEL_SYSTEM_PROMPT}\n\n${dataBlock}` },
     ...prev.turns.slice(-HISTORY_TURNS).map(
       (t): ChatMessage => ({ role: t.role, content: t.content }),
     ),

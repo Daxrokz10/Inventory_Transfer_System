@@ -46,6 +46,27 @@ export interface ChatOptions {
 
 const DEFAULT_TIMEOUT_MS = 25_000;
 
+/* Merge neighbouring system messages into one.
+
+   Several chat templates — Qwen3.5's among them — allow exactly one system
+   message, at position zero, and reject anything else with a Jinja error
+   ("System message must be at the beginning") surfaced as an HTTP 400. That's
+   a property of whichever GGUF is loaded, not of the OpenAI protocol, so it
+   is normalised here rather than left for each callsite to remember. */
+function collapseSystemMessages(messages: ChatMessage[]): ChatMessage[] {
+  const out: ChatMessage[] = [];
+  for (const m of messages) {
+    const prev = out[out.length - 1];
+    if (m.role === "system" && prev?.role === "system") {
+      prev.content = `${prev.content}\n\n${m.content}`;
+      continue;
+    }
+    // Copied, so merging never mutates the caller's array.
+    out.push({ ...m });
+  }
+  return out;
+}
+
 /** Shown verbatim to admins, so it says what to do rather than what broke. */
 const UNAVAILABLE =
   "The local assistant isn't reachable right now — the PC hosting it may be asleep or offline. Everything else on this page works as normal.";
@@ -79,7 +100,7 @@ export async function chatComplete(
         // LM Studio serves whichever model is loaded regardless of this
         // value, but the OpenAI schema requires the field.
         model: process.env.LLM_MODEL || "local-model",
-        messages,
+        messages: collapseSystemMessages(messages),
         temperature: opts.temperature ?? 0.2,
         max_tokens: opts.maxTokens ?? 900,
         stream: false,
