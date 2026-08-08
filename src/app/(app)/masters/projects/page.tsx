@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { canEditClosingBalance } from "./constants";
+import { EditableQtyCell } from "./EditableQtyCell";
 
 const qty = (n: number) =>
   n === 0 ? "" : new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
@@ -19,6 +21,8 @@ export default async function ClosingBalancePage({
     : { data: null };
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;
+  // In-place quantity editing is limited to two specific accounts.
+  const canEdit = canEditClosingBalance(user?.email);
 
   let balQuery = supabase.from("stock_balances").select("project_id, item_id, on_hand");
   if (!isAdmin && homeProjectId) balQuery = balQuery.eq("project_id", homeProjectId);
@@ -84,12 +88,28 @@ export default async function ClosingBalancePage({
           <h1 className="text-2xl font-semibold tracking-tight">Closing balance</h1>
           <p className="mt-1 text-sm text-ink-2">
             Live on-hand quantity of every item at every site — computed from the ledger, always ties out.
+            {canEdit && (
+              <>
+                {" "}
+                <span className="font-medium text-accent">
+                  Triple-click any quantity to correct it.
+                </span>
+              </>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-sm text-ink-2">
             {rowItems.length} items × {siteCols.length} sites
           </span>
+          {isAdmin && (
+            <a
+              href="/masters/projects/adjustments"
+              className="rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-ink-2 hover:bg-surface-2"
+            >
+              Adjustment history
+            </a>
+          )}
           <a
             href={exportHref}
             className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-strong"
@@ -161,8 +181,19 @@ export default async function ClosingBalancePage({
                     </td>
                     {siteCols.map((s) => {
                       const v = row.get(s.id) ?? 0;
-                      return (
-                        <td key={s.id} className={`${td} ${v < 0 ? "text-danger font-medium" : "text-ink-2"}`}>
+                      const cls = `${td} ${v < 0 ? "text-danger font-medium" : "text-ink-2"}`;
+                      return canEdit ? (
+                        <EditableQtyCell
+                          key={s.id}
+                          projectId={s.id}
+                          itemId={it.id}
+                          value={v}
+                          display={qty(v)}
+                          className={cls}
+                          label={`${it.code} @ ${s.code}`}
+                        />
+                      ) : (
+                        <td key={s.id} className={cls}>
                           {qty(v)}
                         </td>
                       );
