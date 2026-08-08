@@ -44,11 +44,16 @@ export interface ChatOptions {
   timeoutMs?: number;
 }
 
-/* A 9B model on a home PC is not fast, and a reasoning model is slower still.
-   Kept below the platform's own 60s function ceiling so we return a readable
-   message rather than being killed mid-request. */
-const DEFAULT_TIMEOUT_MS = 45_000;
-const DEFAULT_MAX_TOKENS = 1_200;
+/* Kept just under the platform's 60s function ceiling, so we abort and return
+   a readable message rather than being killed mid-request with nothing. */
+const DEFAULT_TIMEOUT_MS = 55_000;
+
+/* Generation length is the dominant cost on consumer hardware: a 9B model at
+   ~10 tokens/sec spends 150 seconds on a 1500-token answer, which no timeout
+   here can rescue. Prompt size barely matters by comparison — it is processed
+   in parallel and the snapshot prefix is cached between questions. So this is
+   deliberately tight, and the prompt asks for brevity to match. */
+const DEFAULT_MAX_TOKENS = 600;
 
 /* Merge neighbouring system messages into one.
 
@@ -74,6 +79,13 @@ function collapseSystemMessages(messages: ChatMessage[]): ChatMessage[] {
 /** Shown verbatim to admins, so it says what to do rather than what broke. */
 const UNAVAILABLE =
   "The local assistant isn't reachable right now — the PC hosting it may be asleep or offline. Everything else on this page works as normal.";
+
+/* A timeout is NOT the same as an unreachable host, and conflating them sends
+   the reader to check the tunnel when the real problem is that their PC is
+   still generating. The distinction is the difference between a five-minute
+   wild goose chase and a one-line fix. */
+const TIMED_OUT =
+  "The model is running but didn't finish in time. It's generating too slowly for a question this size — try a narrower date range, a single site, or a more specific question.";
 
 export async function chatComplete(
   messages: ChatMessage[],
@@ -157,12 +169,13 @@ export async function chatComplete(
     }
     return { ok: false, error: "The assistant returned an empty response." };
   } catch (err) {
-    // AbortError (our timeout) and TypeError (DNS/connection refused) both
-    // land here, and both mean the same thing to the person looking at the
-    // screen. Logged so a genuinely odd failure is still diagnosable.
-    if (!(err instanceof Error && err.name === "AbortError")) {
-      console.error("LLM request failed", err);
+    // Our own timeout firing means the model answered the connection but is
+    // grinding — a completely different problem from nothing listening, and
+    // told apart here so the message can point at the right thing.
+    if (err instanceof Error && err.name === "AbortError") {
+      return { ok: false, error: TIMED_OUT };
     }
+    console.error("LLM request failed", err);
     return { ok: false, error: UNAVAILABLE };
   } finally {
     clearTimeout(timer);

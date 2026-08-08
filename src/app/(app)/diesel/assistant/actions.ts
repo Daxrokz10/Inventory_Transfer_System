@@ -87,9 +87,9 @@ export async function askDieselAssistant(
     { role: "user", content: question },
   ];
 
-  // Headroom above what an answer needs, so a model that insists on thinking
-  // anyway still has room left to actually reply.
-  const result = await chatComplete(messages, { maxTokens: 1500 });
+  // Enough for a thorough answer to a real question, but not enough to spend
+  // two minutes writing an essay a local model can't deliver in time.
+  const result = await chatComplete(messages, { maxTokens: 700 });
   if (!result.ok) return { ...prev, error: result.error };
 
   return {

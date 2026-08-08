@@ -75,7 +75,9 @@ export async function generateNarrative(
       { role: "system", content: DIESEL_SYSTEM_PROMPT },
       { role: "user", content: `${snapshot.markdown}\n\n${INSTRUCTION}` },
     ],
-    { maxTokens: 1500 },
+    // The brief above asks for under 300 words; this is headroom on that, not
+    // an invitation to write more.
+    { maxTokens: 700 },
   );
 
   if (!result.ok) return { status: "error", error: result.error };
