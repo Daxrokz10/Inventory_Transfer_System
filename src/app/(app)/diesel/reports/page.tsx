@@ -10,6 +10,10 @@ import { fetchMonthlyReport, rowAverage, rowTotalRun } from "@/lib/diesel/monthl
 import { isLlmConfigured } from "@/lib/llm/client";
 import { AiSummary } from "./AiSummary";
 
+/* Governs the generateNarrative Server Action as well as this page's render —
+   the model needs far longer than the platform's 10s default. */
+export const maxDuration = 60;
+
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",

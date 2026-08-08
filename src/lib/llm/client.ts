@@ -44,7 +44,11 @@ export interface ChatOptions {
   timeoutMs?: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 25_000;
+/* A 9B model on a home PC is not fast, and a reasoning model is slower still.
+   Kept below the platform's own 60s function ceiling so we return a readable
+   message rather than being killed mid-request. */
+const DEFAULT_TIMEOUT_MS = 45_000;
+const DEFAULT_MAX_TOKENS = 1_200;
 
 /* Merge neighbouring system messages into one.
 
@@ -87,8 +91,9 @@ export async function chatComplete(
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   );
 
-  try {
-    const res = await fetch(`${base.replace(/\/$/, "")}/chat/completions`, {
+  const url = `${base.replace(/\/$/, "")}/chat/completions`;
+  const post = (noThinking: boolean) =>
+    fetch(url, {
       method: "POST",
       signal: controller.signal,
       cache: "no-store",
@@ -102,10 +107,30 @@ export async function chatComplete(
         model: process.env.LLM_MODEL || "local-model",
         messages: collapseSystemMessages(messages),
         temperature: opts.temperature ?? 0.2,
-        max_tokens: opts.maxTokens ?? 900,
+        max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
         stream: false,
+        /* Reasoning models (Qwen3.x, DeepSeek-R1 and friends) otherwise spend
+           the whole token budget "thinking" and return an empty `content`
+           with the chain-of-thought in `reasoning_content`. None of the work
+           here benefits from that — the numbers are already computed, the
+           model only has to phrase them — so thinking is switched off at the
+           chat template. Passed as a template kwarg, which servers that don't
+           understand it ignore; the retry below covers the stricter ones. */
+        ...(noThinking
+          ? { chat_template_kwargs: { enable_thinking: false } }
+          : {}),
       }),
     });
+
+  try {
+    let res = await post(true);
+    // A strict server may reject the unknown template kwarg outright. One
+    // retry without it, so an unrecognised knob degrades to "slower and
+    // chattier" instead of "broken".
+    if (res.status === 400) {
+      console.warn("LLM rejected enable_thinking kwarg; retrying without it");
+      res = await post(false);
+    }
 
     if (!res.ok) {
       // A 5xx from the tunnel usually means nothing is listening behind it,
@@ -118,11 +143,19 @@ export async function chatComplete(
     }
 
     const body: unknown = await res.json();
-    const text = extractText(body);
-    if (!text) {
-      return { ok: false, error: "The assistant returned an empty response." };
+    const extracted = extractText(body);
+    if (extracted.text) return { ok: true, text: extracted.text };
+    // Empty answer but a chain-of-thought present means the budget ran out
+    // mid-thought. Saying so beats a generic "empty response", because the fix
+    // is a real one the admin can act on.
+    if (extracted.wasThinking) {
+      return {
+        ok: false,
+        error:
+          "The model used its whole response budget thinking and never got to an answer. Try a shorter question, or turn off reasoning for this model in LM Studio.",
+      };
     }
-    return { ok: true, text };
+    return { ok: false, error: "The assistant returned an empty response." };
   } catch (err) {
     // AbortError (our timeout) and TypeError (DNS/connection refused) both
     // land here, and both mean the same thing to the person looking at the
@@ -136,16 +169,27 @@ export async function chatComplete(
   }
 }
 
-/** Pull the assistant text out of an OpenAI-shaped response without
-    trusting its shape — a local server behind a tunnel is not a contract. */
-function extractText(body: unknown): string | null {
-  if (typeof body !== "object" || body === null) return null;
+/** Pull the assistant text out of an OpenAI-shaped response without trusting
+    its shape — a local server behind a tunnel is not a contract.
+
+    `wasThinking` reports that the model produced reasoning but no answer,
+    which is a different failure from a genuinely empty reply and gets its own
+    message to the admin. The chain-of-thought itself is deliberately NOT
+    returned as the answer: it's working-out, not a reply, and showing it would
+    look like the assistant had answered when it hadn't. */
+function extractText(body: unknown): { text: string | null; wasThinking: boolean } {
+  const none = { text: null, wasThinking: false };
+  if (typeof body !== "object" || body === null) return none;
   const choices = (body as { choices?: unknown }).choices;
-  if (!Array.isArray(choices) || choices.length === 0) return null;
+  if (!Array.isArray(choices) || choices.length === 0) return none;
   const message = (choices[0] as { message?: unknown }).message;
-  if (typeof message !== "object" || message === null) return null;
+  if (typeof message !== "object" || message === null) return none;
+
+  const reasoning = (message as { reasoning_content?: unknown }).reasoning_content;
+  const wasThinking = typeof reasoning === "string" && reasoning.trim() !== "";
+
   const content = (message as { content?: unknown }).content;
-  if (typeof content !== "string") return null;
+  if (typeof content !== "string") return { text: null, wasThinking };
   const trimmed = content.trim();
-  return trimmed === "" ? null : trimmed;
+  return { text: trimmed === "" ? null : trimmed, wasThinking };
 }

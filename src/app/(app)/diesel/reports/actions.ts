@@ -75,7 +75,7 @@ export async function generateNarrative(
       { role: "system", content: DIESEL_SYSTEM_PROMPT },
       { role: "user", content: `${snapshot.markdown}\n\n${INSTRUCTION}` },
     ],
-    { maxTokens: 700 },
+    { maxTokens: 1500 },
   );
 
   if (!result.ok) return { status: "error", error: result.error };

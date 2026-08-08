@@ -10,6 +10,11 @@ import { AssistantChat } from "./AssistantChat";
    Nothing on this page calls the model during render — the chat component
    only reaches out on an explicit question, so the page loads normally even
    with the host PC asleep. */
+
+/* Server Actions run in this route's segment, so this ceiling governs
+   askDieselAssistant too. Without it the platform's 10s default would kill a
+   question long before a 9B model on a home PC finishes answering. */
+export const maxDuration = 60;
 export default async function DieselAssistantPage() {
   const supabase = await createClient();
   const {

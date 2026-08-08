@@ -87,7 +87,9 @@ export async function askDieselAssistant(
     { role: "user", content: question },
   ];
 
-  const result = await chatComplete(messages, { maxTokens: 800 });
+  // Headroom above what an answer needs, so a model that insists on thinking
+  // anyway still has room left to actually reply.
+  const result = await chatComplete(messages, { maxTokens: 1500 });
   if (!result.ok) return { ...prev, error: result.error };
 
   return {
