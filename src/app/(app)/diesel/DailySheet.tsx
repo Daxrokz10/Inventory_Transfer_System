@@ -35,7 +35,7 @@ function daysSince(lastDate: string, today: string): number {
   return Math.round(ms / 86_400_000);
 }
 
-type FuelSource = "on_site" | "shraddha" | "outside";
+type FuelSource = "on_site" | "outside";
 
 interface RowState {
   status: Status;
@@ -51,7 +51,6 @@ export function DailySheet({
   logDate,
   dieselPrice,
   petrolPrice,
-  shraddhaPump = false,
   lastReportedByMachine = {},
   homeProjectId = null,
   siteLabelById = {},
@@ -61,10 +60,6 @@ export function DailySheet({
   logDate: string;
   dieselPrice: number | null;
   petrolPrice: number | null;
-  /** True when this site fills at the sister company (Shraddha) pump —
-      changes the source picker's options (Shraddha pump / Outside pump)
-      instead of the default (On site / Offsite) shown everywhere else. */
-  shraddhaPump?: boolean;
   /** Each machine's most recent report date before today (if any), used to
       nudge the site person to fold a missed day's fuel into today's entry
       instead of leaving it unaccounted for — only today can be filed. */
@@ -83,19 +78,19 @@ export function DailySheet({
   const initial = useMemo(() => {
     const map: Record<string, RowState> = {};
     for (const m of editable) {
-      // Default source: Shraddha's pump at those two sites, this site's own
-      // stock everywhere else — the site person only touches it to flag the
-      // exception (a vehicle that went to fill outside).
+      // Every site defaults to its own on-site stock — the site person
+      // only touches this to flag the exception (a vehicle that went to
+      // fill outside, wherever that outside pump happens to be).
       map[m.id] = {
         status: "normal",
         reading: "",
         fuel: "",
-        source: shraddhaPump ? "shraddha" : "on_site",
+        source: "on_site",
         remarks: "",
       };
     }
     return map;
-  }, [editable, shraddhaPump]);
+  }, [editable]);
 
   const [rows, setRows] = useState(initial);
   const [error, formAction, pending] = useActionState(saveDailySheet, null);
@@ -314,17 +309,8 @@ export function DailySheet({
                             className="w-28 text-xs"
                             aria-label={`${m.name} fuel source`}
                           >
-                            {shraddhaPump ? (
-                              <>
-                                <option value="shraddha">Shraddha pump</option>
-                                <option value="outside">Outside pump</option>
-                              </>
-                            ) : (
-                              <>
-                                <option value="on_site">On site</option>
-                                <option value="outside">Offsite</option>
-                              </>
-                            )}
+                            <option value="on_site">On site</option>
+                            <option value="outside">Offsite</option>
                           </Select>
                         )}
                       </div>

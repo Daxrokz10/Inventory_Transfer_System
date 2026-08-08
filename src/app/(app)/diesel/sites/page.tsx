@@ -4,7 +4,6 @@ import { INDIAN_STATES, cityForState } from "@/lib/diesel/types";
 import { SiteForm } from "./SiteForm";
 import {
   updateSiteState,
-  setShraddhaPump,
   deleteSiteGroup,
   setGroupShareExternal,
 } from "./actions";
@@ -28,7 +27,7 @@ export default async function SitesPage() {
     await Promise.all([
       supabase
         .from("projects")
-        .select("id, code, name, branch, gstin, state, shraddha_pump, group_id")
+        .select("id, code, name, branch, gstin, state, group_id")
         .order("code"),
       supabase
         .from("fuel_prices")
@@ -145,7 +144,6 @@ export default async function SitesPage() {
                 <th className="py-2 pr-4">Branch</th>
                 <th className="py-2 pr-4">GSTIN</th>
                 <th className="py-2 pr-4">State (fuel prices)</th>
-                <th className="py-2 pr-4">Shraddha pump</th>
                 <th className="py-2 pr-4">Group</th>
                 <th className="py-2 pr-4 text-right">Diesel ₹/L</th>
                 <th className="py-2 text-right">Petrol ₹/L</th>
@@ -184,25 +182,6 @@ export default async function SitesPage() {
                             </option>
                           ))}
                         </select>
-                        <button
-                          type="submit"
-                          className="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-2 hover:bg-surface-2"
-                        >
-                          Save
-                        </button>
-                      </form>
-                    </td>
-                    <td className="py-2.5 pr-4">
-                      <form action={setShraddhaPump} className="flex items-center gap-1.5">
-                        <input type="hidden" name="project_id" value={p.id} />
-                        <label className="flex items-center gap-1.5 text-xs text-ink-2">
-                          <input
-                            type="checkbox"
-                            name="shraddha_pump"
-                            defaultChecked={p.shraddha_pump === true}
-                          />
-                          Shraddha
-                        </label>
                         <button
                           type="submit"
                           className="rounded-md border border-line-strong px-2 py-1 text-xs text-ink-2 hover:bg-surface-2"

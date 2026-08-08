@@ -18,8 +18,9 @@ interface SheetRow {
       the machine simply wasn't in normal use. */
   status: "normal" | "breakdown" | "maintenance";
   /** Where fuel was filled — "outside" if the vehicle went to a pump not
-      tied to the site's own stock; otherwise the site's normal source
-      (on_site, or shraddha at the two Shraddha-pump sites). */
+      tied to the site's own stock; otherwise the site's own on-site
+      stock. "shraddha" is a legacy value — no longer written, but still
+      read from historical logs. */
   fuel_source?: "on_site" | "shraddha" | "outside" | null;
 }
 
@@ -144,13 +145,10 @@ export async function saveDailySheet(
   // city, cache → scrape → stale).
   const { data: project } = await admin
     .from("projects")
-    .select("state, shraddha_pump")
+    .select("state")
     .eq("id", projectId)
     .single();
   const prices = await getPricesForCity(cityForState(project?.state ?? null), log_date);
-  // Source is only meaningful at Shraddha-pump sites — enforce server-side
-  // so a stale/forged client can't stamp a source on a non-Shraddha site.
-  const isShraddhaPump = project?.shraddha_pump === true;
 
   const inserts = rows.map((r) => {
     const m = machineById.get(r.machine_id)!;
@@ -173,18 +171,10 @@ export async function saveDailySheet(
           : null,
       remarks: (r.remarks ?? "").trim() || null,
       status: r.status,
-      // Source only applies with fuel. Every site defaults to its normal
-      // source (on_site everywhere, shraddha at the two Shraddha-pump
-      // sites) unless the client explicitly says the vehicle went outside —
-      // re-derived here rather than trusted from the client.
-      fuel_source:
-        fuel_issued_liters > 0
-          ? r.fuel_source === "outside"
-            ? "outside"
-            : isShraddhaPump
-              ? "shraddha"
-              : "on_site"
-          : null,
+      // Source only applies with fuel. Every site defaults to its own
+      // on-site stock unless the client explicitly says the vehicle went
+      // outside — re-derived here rather than trusted from the client.
+      fuel_source: fuel_issued_liters > 0 ? (r.fuel_source === "outside" ? "outside" : "on_site") : null,
       entered_by: user.id,
     };
   });

@@ -336,13 +336,13 @@ export default async function DieselPage({
       ? supabase.from("projects").select("id, name, code, state").eq("is_active", true).order("name")
       : Promise.resolve({ data: null }),
     siteFilter
-      ? supabase.from("projects").select("id, name, state, shraddha_pump").eq("id", siteFilter).single()
+      ? supabase.from("projects").select("id, name, state").eq("id", siteFilter).single()
       : Promise.resolve({ data: null }),
   ]);
 
   const machines = (machinesRaw ?? []) as Machine[];
   const projects = (projectsRes.data ?? []) as { id: string; name: string; code: string | null; state: string | null }[];
-  const site = siteRes.data as { id: string; name: string; state: string | null; shraddha_pump?: boolean } | null;
+  const site = siteRes.data as { id: string; name: string; state: string | null } | null;
   const siteCity = cityForState(site?.state ?? null);
 
   // SO / deployment-deadline status across ALL active machines at the
@@ -484,7 +484,6 @@ export default async function DieselPage({
           logDate={date}
           dieselPrice={prices.diesel}
           petrolPrice={prices.petrol}
-          shraddhaPump={site?.shraddha_pump ?? false}
           lastReportedByMachine={lastReportedByMachine}
           homeProjectId={homeProjectId}
           siteLabelById={siteLabelById}

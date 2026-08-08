@@ -76,21 +76,6 @@ export async function updateSiteState(formData: FormData): Promise<void> {
   revalidatePath("/diesel");
 }
 
-// Toggle whether a site fills its machines at the sister company (Shraddha)
-// pump. When on, the daily report at that site asks per fill whether it came
-// from Shraddha's pump or a regular one; when off, no source is tracked.
-export async function setShraddhaPump(formData: FormData): Promise<void> {
-  const supabase = await requireAdmin();
-  const id = String(formData.get("project_id") ?? "");
-  const on = formData.get("shraddha_pump") === "on";
-  if (!id) return;
-
-  await supabase.from("projects").update({ shraddha_pump: on }).eq("id", id);
-
-  revalidatePath("/diesel/sites");
-  revalidatePath("/diesel");
-}
-
 // Create a site group — sites whose INTERNAL machinery moves freely
 // between them. Membership itself is set per-site via setSiteGroup below.
 export async function createSiteGroup(
