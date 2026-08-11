@@ -123,10 +123,21 @@ export default async function MachinesPage({
     const rows = logsByMachine.get(m.id);
     if (!rows || rows.length === 0) continue;
     const sorted = [...rows].sort((a, b) => (a.log_date < b.log_date ? -1 : a.log_date > b.log_date ? 1 : 0));
-    const opening = sorted.find((l) => l.opening_reading != null)?.opening_reading ?? null;
+    const openingRow = sorted.find((l) => l.opening_reading != null);
+    const opening = openingRow?.opening_reading ?? null;
     const lastClosing = [...sorted].reverse().find((l) => l.closing_reading != null)?.closing_reading ?? null;
     const end = m.current_reading ?? lastClosing;
-    const totalFuel = sorted.reduce((s, l) => s + Number(l.fuel_issued_liters), 0);
+    // Fuel counts only from the day the opening reading came from, onward.
+    // A fill logged BEFORE that day (meter simply wasn't read that day) has
+    // no reading to bracket its distance — the measured span below starts
+    // at `opening`, so that earlier fuel covers ground this calculation
+    // can't see. Summing it anyway inflates the total against a distance
+    // that never counted it, understating the true average.
+    const totalFuel = openingRow
+      ? sorted
+          .filter((l) => l.log_date >= openingRow.log_date)
+          .reduce((s, l) => s + Number(l.fuel_issued_liters), 0)
+      : 0;
     if (opening == null || end == null || totalFuel <= 0) continue;
     const distance = Number(end) - Number(opening);
     if (distance <= 0) continue;

@@ -21,6 +21,14 @@ export interface MonthlyReportRow {
   shraddha_fuel: number;
   shraddha_cost: number;
   days_reported: number;
+  /** Fuel counted from the day `opening_reading` was actually established
+      onward — used ONLY for rowAverage, never for cost/register totals.
+      A machine's very first log ever (or a brand-new machine filed before
+      its first reading was set) can carry fuel with no opening reading at
+      all, so that fill has no measurable distance to divide by. Equal to
+      total_fuel except in that edge case — see rowAverage for why counting
+      it there would understate efficiency, not overstate it. */
+  measured_fuel: number;
 }
 
 /** "YYYY-MM" → the month's first and last calendar dates (YYYY-MM-DD). */
@@ -94,17 +102,26 @@ export async function fetchMonthlyReport(
         shraddha_fuel: 0,
         shraddha_cost: 0,
         days_reported: 0,
+        measured_fuel: 0,
       });
     }
     const row = grouped.get(l.machine_id)!;
     // Logs arrive oldest-first, so the earliest non-null opening and the
-    // latest non-null closing bracket the whole month's reading span.
+    // latest non-null closing bracket the whole month's reading span. Note
+    // WHICH row supplies that opening (openingKnown flips true on it) —
+    // that's the point measured_fuel starts counting from.
+    const openingKnown = row.opening_reading != null;
     if (row.opening_reading == null) row.opening_reading = l.opening_reading;
     if (l.closing_reading != null) row.closing_reading = l.closing_reading;
     const fuel = Number(l.fuel_issued_liters);
     const cost = Number(l.total_cost ?? 0);
     row.total_fuel += fuel;
     row.total_cost += cost;
+    // True total (above) always includes this fuel — the register and the
+    // grand totals need every liter, whether or not it lands inside a
+    // measurable span. measured_fuel only starts once an opening reading is
+    // on record, INCLUDING the very row that establishes it.
+    if (openingKnown || l.opening_reading != null) row.measured_fuel += fuel;
     if (l.fuel_source === "shraddha") {
       row.shraddha_fuel += fuel;
       row.shraddha_cost += cost;
@@ -126,11 +143,19 @@ export function rowTotalRun(r: MonthlyReportRow): number | null {
 }
 
 /** Average efficiency over the range — km/L for odometer machines,
-    L/hr for hour-metered ones — or null if there's not enough data. */
+    L/hr for hour-metered ones — or null if there's not enough data.
+
+    Uses measured_fuel, not total_fuel: rowTotalRun measures distance from
+    the day an opening reading was first recorded, and any fuel logged
+    before that (a machine's very first entry ever, before any prior
+    reading existed to carry forward) covered ground this range can't see.
+    Dividing the FULL fuel total by that partial distance would understate
+    efficiency — the average would look worse than the vehicle actually is,
+    for a reason that has nothing to do with how it's running. */
 export function rowAverage(r: MonthlyReportRow): number | null {
   const run = rowTotalRun(r);
-  if (run == null || r.total_fuel <= 0) return null;
-  return r.reading_type === "hours" ? r.total_fuel / run : run / r.total_fuel;
+  if (run == null || r.measured_fuel <= 0) return null;
+  return r.reading_type === "hours" ? r.measured_fuel / run : run / r.measured_fuel;
 }
 
 function csvEscape(v: string | number): string {
