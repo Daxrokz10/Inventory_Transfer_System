@@ -24,20 +24,18 @@ export interface FillMetric {
 
 /**
  * Attributes each fill's fuel to the FULL distance/hours it actually
- * covered — from its own opening reading through the reading right
- * before the NEXT fill — instead of just that single calendar day's
- * movement.
+ * covered — from the reading AT the fill (the trip that was just
+ * finished is already done, on whatever fuel was in the tank before)
+ * through the reading right before the NEXT fill — instead of just
+ * that single calendar day's movement.
  *
- * Fuel doesn't get consumed the instant it's dispensed: a tank topped up
- * today might run the machine for another three or four days before the
- * next fill. The old per-day math blamed all of today's fuel on today's
- * movement alone (making a fill-day always look artificially inefficient)
- * while the days it actually powered — no new fuel entered — contributed
- * nothing at all, since they were excluded outright. Pairing each fill
- * with the reading at its NEXT fill fixes this without needing day-by-day
- * accounting: readings are just a running total, so "next fill's opening
- * reading" already equals "whatever the reading was right before that
- * fill," across however many (or few) days sit in between.
+ * Fuel is dispensed after that day's trip is already complete, so it
+ * doesn't power the movement it's logged alongside — it powers whatever
+ * comes next, until the tank is topped up again. Pairing each fill with
+ * the span from its OWN closing reading through the next fill's closing
+ * reading captures that: readings are a running total, so "next fill's
+ * closing reading" already equals "whatever the reading was right
+ * before that fill," across however many (or few) days sit in between.
  *
  * `logs` only needs to contain this machine's fuel-days
  * (fuel_issued_liters > 0) — order doesn't matter, this sorts them.
@@ -52,7 +50,7 @@ export function computeFillMetrics(
   currentReading?: number | null,
 ): FillMetric[] {
   const fillDays = logs
-    .filter((l) => Number(l.fuel_issued_liters) > 0 && l.opening_reading != null)
+    .filter((l) => Number(l.fuel_issued_liters) > 0 && l.closing_reading != null)
     .sort((a, b) => (a.log_date < b.log_date ? -1 : a.log_date > b.log_date ? 1 : 0));
 
   const isHours = machine.reading_type === "hours";
@@ -61,10 +59,10 @@ export function computeFillMetrics(
   for (let i = 0; i < fillDays.length; i++) {
     const fill = fillDays[i];
     const next = fillDays[i + 1];
-    const endReading = next ? next.opening_reading : (currentReading ?? null);
+    const endReading = next ? next.closing_reading : (currentReading ?? null);
     if (endReading == null) continue;
 
-    const distance = Number(endReading) - Number(fill.opening_reading);
+    const distance = Number(endReading) - Number(fill.closing_reading);
     const fuel = Number(fill.fuel_issued_liters);
     if (distance <= 0 || fuel <= 0) continue;
 

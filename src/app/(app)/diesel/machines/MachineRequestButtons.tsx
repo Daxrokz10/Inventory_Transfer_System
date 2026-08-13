@@ -81,14 +81,21 @@ export function MachineRequestButtons({
       >
         Request renewal
       </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => setOpen("removal")}
-      >
-        Request removal
-      </Button>
+      {/* External machines already have a self-service "Remove" (see
+          RemoveHiredMachineButton) that needs no admin approval — routing
+          the same action through a request here would just make the site
+          wait on something they can already do themselves. Only internal
+          machines need to ASK, since only an admin can take one off site. */}
+      {ownership === "internal" && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => setOpen("removal")}
+        >
+          Request removal
+        </Button>
+      )}
     </div>
   );
 }

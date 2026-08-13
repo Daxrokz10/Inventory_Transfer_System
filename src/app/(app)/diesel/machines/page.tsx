@@ -100,12 +100,16 @@ export default async function MachinesPage({
   const siteCode = new Map(siteList.map((p) => [p.id, p.code]));
 
   // Current running average (last 90 days) per machine — km/L or L/hr,
-  // matching how the machine is metered. Total distance/hours covered
-  // over the window (earliest opening → latest known reading) divided by
-  // total fuel used, same whole-period method as the Reports page's
-  // "Average" column — not an average of individual fills, which can
-  // over/under-weight fills with little fuel or distance and silently
-  // drops any fill whose interval showed zero movement.
+  // matching how the machine is metered. Same whole-period method as the
+  // Reports page's "Average" column, not an average of individual fills
+  // (which can over/under-weight fills with little fuel or distance and
+  // silently drops any fill whose interval showed zero movement).
+  // Fuel is dispensed AFTER that day's trip is done, so each fill powers
+  // the leg that follows it, not the one it's logged alongside — the
+  // window runs from the first fill's closing reading (distance before
+  // that ran on fuel outside this window) to the last fill's closing
+  // reading, and excludes that last fill's own fuel (its leg hasn't
+  // happened yet).
   type RecentLog = {
     id: string;
     machine_id: string;
@@ -122,24 +126,16 @@ export default async function MachinesPage({
   for (const m of machines) {
     const rows = logsByMachine.get(m.id);
     if (!rows || rows.length === 0) continue;
-    const sorted = [...rows].sort((a, b) => (a.log_date < b.log_date ? -1 : a.log_date > b.log_date ? 1 : 0));
-    const openingRow = sorted.find((l) => l.opening_reading != null);
-    const opening = openingRow?.opening_reading ?? null;
-    const lastClosing = [...sorted].reverse().find((l) => l.closing_reading != null)?.closing_reading ?? null;
-    const end = m.current_reading ?? lastClosing;
-    // Fuel counts only from the day the opening reading came from, onward.
-    // A fill logged BEFORE that day (meter simply wasn't read that day) has
-    // no reading to bracket its distance — the measured span below starts
-    // at `opening`, so that earlier fuel covers ground this calculation
-    // can't see. Summing it anyway inflates the total against a distance
-    // that never counted it, understating the true average.
-    const totalFuel = openingRow
-      ? sorted
-          .filter((l) => l.log_date >= openingRow.log_date)
-          .reduce((s, l) => s + Number(l.fuel_issued_liters), 0)
-      : 0;
-    if (opening == null || end == null || totalFuel <= 0) continue;
-    const distance = Number(end) - Number(opening);
+    const fillRows = rows
+      .filter((l) => Number(l.fuel_issued_liters) > 0 && l.closing_reading != null)
+      .sort((a, b) => (a.log_date < b.log_date ? -1 : a.log_date > b.log_date ? 1 : 0));
+    if (fillRows.length < 2) continue; // need one fill to start the clock, one to end it
+    // Every fill except the last: its fuel's leg is already resolved by a
+    // later fill's closing reading. The last fill's leg hasn't happened yet.
+    const resolvedFills = fillRows.slice(0, -1);
+    const totalFuel = resolvedFills.reduce((s, l) => s + Number(l.fuel_issued_liters), 0);
+    if (totalFuel <= 0) continue;
+    const distance = Number(fillRows[fillRows.length - 1].closing_reading) - Number(fillRows[0].closing_reading);
     if (distance <= 0) continue;
     const value = m.reading_type === "hours" ? totalFuel / distance : distance / totalFuel;
     runningAvg.set(m.id, value);

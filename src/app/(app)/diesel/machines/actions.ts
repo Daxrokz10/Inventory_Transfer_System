@@ -341,6 +341,15 @@ export async function requestMachineChange(
 
   const machine = await loadMachine(supabase, machine_id);
   if (!machine) return "That machine no longer exists.";
+  // External machines have their own self-service removal (removeHiredMachine
+  // → the remove_hired_machine RPC) that needs no admin approval — a removal
+  // REQUEST for one would just make the site wait on something they can
+  // already do themselves. The UI hides this option for external machines;
+  // this rejects it server-side too, so posting the form directly can't get
+  // around that.
+  if (type === "removal" && machine.ownership === "external") {
+    return "External machines can be removed directly from the Machinery list — no admin approval needed.";
+  }
 
   const { error } = await supabase.from("machine_requests").insert({
     machine_id,
