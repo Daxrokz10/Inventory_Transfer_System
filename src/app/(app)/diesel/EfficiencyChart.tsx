@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -26,6 +27,10 @@ const SERIES = [
 export interface EfficiencyPoint {
   machine_id: string;
   machine_label: string;
+  /** Machine's registered type (e.g. "Car / Jeep", "DG Set") — drives the
+      type filter tabs. Omit on single-machine views, where every point is
+      already the same machine and a type filter has nothing to do. */
+  machine_type?: string;
   entry_date: string;
   value: number;
   unit: "km/L" | "L/hr";
@@ -36,6 +41,23 @@ export interface EfficiencyPoint {
 }
 
 export function EfficiencyChart({ points }: { points: EfficiencyPoint[] }) {
+  // Every type present, ranked by how many points it contributes — most
+  // active type first, since that's the one worth seeing by default.
+  const typeCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of points) {
+      if (!p.machine_type) continue;
+      counts.set(p.machine_type, (counts.get(p.machine_type) ?? 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+  }, [points]);
+  const types = typeCounts.map(([t]) => t);
+
+  const [selectedType, setSelectedType] = useState<string | null>(null);
+  // Once types are known, default to the busiest one instead of lumping
+  // every machine type onto a single "top 6" chart.
+  const activeType = selectedType ?? types[0] ?? null;
+
   if (points.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-ink-3">
@@ -45,9 +67,14 @@ export function EfficiencyChart({ points }: { points: EfficiencyPoint[] }) {
     );
   }
 
+  const scoped =
+    types.length > 1 && activeType != null
+      ? points.filter((p) => p.machine_type === activeType)
+      : points;
+
   // Rank machines by number of points; chart at most the top 6.
   const counts = new Map<string, number>();
-  for (const p of points) {
+  for (const p of scoped) {
     counts.set(p.machine_id, (counts.get(p.machine_id) ?? 0) + 1);
   }
   const machineIds = [...counts.entries()]
@@ -56,14 +83,14 @@ export function EfficiencyChart({ points }: { points: EfficiencyPoint[] }) {
     .map(([id]) => id);
   const hidden = counts.size - machineIds.length;
 
-  const labels = new Map(points.map((p) => [p.machine_id, p.machine_label]));
-  const unit = points[0].unit;
+  const labels = new Map(scoped.map((p) => [p.machine_id, p.machine_label]));
+  const unit = scoped[0]?.unit ?? points[0].unit;
 
-  const dates = [...new Set(points.map((p) => p.entry_date))].sort();
+  const dates = [...new Set(scoped.map((p) => p.entry_date))].sort();
   const rows = dates.map((date) => {
     const row: Record<string, string | number> = { entry_date: date };
     for (const id of machineIds) {
-      const match = points.find(
+      const match = scoped.find(
         (p) => p.machine_id === id && p.entry_date === date,
       );
       if (match) row[id] = Number(match.value.toFixed(2));
@@ -73,6 +100,24 @@ export function EfficiencyChart({ points }: { points: EfficiencyPoint[] }) {
 
   return (
     <div>
+      {types.length > 1 && (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {types.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setSelectedType(t)}
+              className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                t === activeType
+                  ? "border-accent bg-accent-soft text-accent"
+                  : "border-line-strong text-ink-3 hover:text-ink"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+      )}
       <ResponsiveContainer width="100%" height={320}>
         <LineChart data={rows} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
           <CartesianGrid stroke="var(--color-line)" vertical={false} />
@@ -118,8 +163,8 @@ export function EfficiencyChart({ points }: { points: EfficiencyPoint[] }) {
       </ResponsiveContainer>
       {hidden > 0 && (
         <p className="mt-1 text-xs text-ink-3">
-          Showing the 6 machines with the most data ({hidden} more not charted —
-          filter by machine to see them).
+          Showing the 6 {activeType ?? "machines"} with the most data ({hidden}{" "}
+          more not charted — pick another type above to see them).
         </p>
       )}
     </div>

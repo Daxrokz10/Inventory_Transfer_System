@@ -55,6 +55,7 @@ function efficiencyPoints(
       points.push({
         machine_id: m.id,
         machine_label: m.name,
+        machine_type: m.machine_type,
         entry_date: fm.log_date,
         value: fm.value,
         unit: fm.unit,
