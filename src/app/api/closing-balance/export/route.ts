@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createRequire } from "module";
 import { createClient } from "@/lib/supabase/server";
+import { selectAll } from "@/lib/supabase/selectAll";
 
 const require = createRequire(import.meta.url);
 const XLSX = require("xlsx");
@@ -21,11 +22,15 @@ export async function GET(req: NextRequest) {
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;
 
-  let balQuery = supabase.from("stock_balances").select("project_id, item_id, on_hand");
-  if (!isAdmin && homeProjectId) balQuery = balQuery.eq("project_id", homeProjectId);
+  // Page through: stock_balances exceeds PostgREST's 1000-row cap, and a
+  // truncated export silently omits stock from the downloaded sheet.
+  type BalRow = { project_id: string; item_id: string; on_hand: number };
+  const balances = await selectAll<BalRow>(() => {
+    const q = supabase.from("stock_balances").select("project_id, item_id, on_hand");
+    return !isAdmin && homeProjectId ? q.eq("project_id", homeProjectId) : q;
+  });
 
-  const [{ data: balances }, { data: items }, { data: projects }] = await Promise.all([
-    balQuery,
+  const [{ data: items }, { data: projects }] = await Promise.all([
     supabase.from("items").select("id, code, description, main_group, unit").order("code"),
     supabase.from("projects").select("id, code, name").order("code"),
   ]);

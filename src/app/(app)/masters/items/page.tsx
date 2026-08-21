@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { selectAll } from "@/lib/supabase/selectAll";
 import { NewItemButton } from "./ItemForm";
 import { ItemsTable } from "./ItemsTable";
 
@@ -10,13 +11,15 @@ export default async function ItemsPage() {
     : { data: null };
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
 
-  const [{ data: items }, { data: balances }, { data: projects }] = await Promise.all([
+  const [{ data: items }, balances, { data: projects }] = await Promise.all([
     supabase
       .from("items")
       .select("id, code, description, unit, sub_group, main_group, hsn_code, per_day_rate")
       .order("code")
       .limit(500),
-    supabase.from("stock_balances").select("project_id, item_id, on_hand"),
+    selectAll<{ project_id: string; item_id: string; on_hand: number }>(() =>
+      supabase.from("stock_balances").select("project_id, item_id, on_hand"),
+    ),
     supabase.from("projects").select("id, code"),
   ]);
 

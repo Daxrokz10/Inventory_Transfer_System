@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { selectAll } from "@/lib/supabase/selectAll";
 import { canEditClosingBalance } from "./constants";
 import { EditableQtyCell } from "./EditableQtyCell";
 
@@ -24,11 +25,15 @@ export default async function ClosingBalancePage({
   // In-place quantity editing is limited to two specific accounts.
   const canEdit = canEditClosingBalance(user?.email);
 
-  let balQuery = supabase.from("stock_balances").select("project_id, item_id, on_hand");
-  if (!isAdmin && homeProjectId) balQuery = balQuery.eq("project_id", homeProjectId);
+  // stock_balances exceeds PostgREST's 1000-row cap, so it must be paged
+  // through — otherwise rows are silently dropped and stock goes missing.
+  type BalRow = { project_id: string; item_id: string; on_hand: number };
+  const balances = await selectAll<BalRow>(() => {
+    const q = supabase.from("stock_balances").select("project_id, item_id, on_hand");
+    return !isAdmin && homeProjectId ? q.eq("project_id", homeProjectId) : q;
+  });
 
-  const [{ data: balances }, { data: items }, { data: projects }] = await Promise.all([
-    balQuery,
+  const [{ data: items }, { data: projects }] = await Promise.all([
     supabase.from("items").select("id, code, description, main_group, unit").order("code"),
     supabase.from("projects").select("id, code, name").order("code"),
   ]);

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { selectAll } from "@/lib/supabase/selectAll";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -51,13 +52,13 @@ export default async function DashboardPage() {
   // Store managers with no site assigned see nothing useful — handle gracefully
   const noSite = !isAdmin && !homeProjectId;
 
-  // Build queries scoped to user's site for store managers
-  const balancesQuery = supabase
-    .from("stock_balances")
-    .select("project_id, item_id, on_hand");
-  if (!isAdmin && homeProjectId) {
-    balancesQuery.eq("project_id", homeProjectId);
-  }
+  // Paged through: stock_balances exceeds PostgREST's 1000-row cap, so a plain
+  // select silently drops rows and understates stock value/units.
+  type BalRow = { project_id: string; item_id: string; on_hand: number };
+  const balancesQuery = selectAll<BalRow>(() => {
+    const q = supabase.from("stock_balances").select("project_id, item_id, on_hand");
+    return !isAdmin && homeProjectId ? q.eq("project_id", homeProjectId) : q;
+  });
 
   const inTransitQuery = supabase
     .from("transfers")
@@ -73,7 +74,7 @@ export default async function DashboardPage() {
     { count: projectCount },
     { count: itemCount },
     inTransit,
-    balancesRes,
+    balances,
     itemsRes,
     projectsRes,
   ] = await Promise.all([
@@ -91,7 +92,6 @@ export default async function DashboardPage() {
       : Promise.resolve({ data: [] }),
   ]);
 
-  const balances = balancesRes.data ?? [];
   const itemInfo = new Map(
     (itemsRes.data ?? []).map((i) => [
       i.id,
