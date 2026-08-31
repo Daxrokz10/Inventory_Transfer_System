@@ -98,12 +98,15 @@ export async function fetchMonthlyReport(
   const [{ data: machinesRaw }, { data: projectsRaw }] = await Promise.all([
     supabase
       .from("machines")
-      .select("id, name, registration_no, reading_type")
+      .select("id, name, registration_no, reading_type, fuel_type")
       .in("id", machineIds),
     supabase.from("projects").select("id, name, code").in("id", projectIds),
   ]);
   const machineById = new Map(
-    (machinesRaw ?? []).map((m) => [m.id as string, m as { name: string; registration_no: string | null; reading_type: "km" | "hours" }]),
+    (machinesRaw ?? []).map((m) => [
+      m.id as string,
+      m as { name: string; registration_no: string | null; reading_type: "km" | "hours"; fuel_type: "diesel" | "petrol" },
+    ]),
   );
   const projectById = new Map(
     (projectsRaw ?? []).map((p) => [p.id as string, p as { name: string; code: string | null }]),
@@ -117,6 +120,11 @@ export async function fetchMonthlyReport(
   const rawByMachine = new Map<string, typeof logs>();
 
   for (const l of logs) {
+    // This is the DIESEL report — a petrol-fueled machine's fuel never
+    // touched the site's diesel barrel (same exclusion register.ts already
+    // applies to the Diesel Register), so it's skipped here too rather than
+    // inflating totals meant for the diesel monthly submission.
+    if (machineById.get(l.machine_id)?.fuel_type === "petrol") continue;
     if (!grouped.has(l.machine_id)) {
       const m = machineById.get(l.machine_id);
       const p = projectById.get(l.project_id);
