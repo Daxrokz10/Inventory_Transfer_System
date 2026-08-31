@@ -59,16 +59,13 @@ export async function fetchMonthlyReport(
   end: string,
   siteFilter: string | null,
 ): Promise<MonthlyReportRow[]> {
-  let query = supabase
-    .from("daily_logs")
-    .select("machine_id, project_id, log_date, opening_reading, closing_reading, fuel_issued_liters, total_cost, fuel_source")
-    .gte("log_date", start)
-    .lte("log_date", end)
-    .order("log_date", { ascending: true });
-  if (siteFilter) query = query.eq("project_id", siteFilter);
-
-  const { data: logsRaw } = await query;
-  const logs = (logsRaw ?? []) as {
+  // Supabase/PostgREST caps any query with no explicit range at 1000 rows —
+  // silently, with no error. A full month across every site routinely
+  // exceeds that (August 2026 alone is 1300+), which was truncating the
+  // report and its CSV export partway through the month with no sign
+  // anything was cut. Page through in chunks of 1000 until a page comes
+  // back short, so the whole range is always fetched regardless of size.
+  type LogRow = {
     machine_id: string;
     project_id: string;
     log_date: string;
@@ -77,7 +74,22 @@ export async function fetchMonthlyReport(
     fuel_issued_liters: number;
     total_cost: number | null;
     fuel_source: "shraddha" | "outside" | null;
-  }[];
+  };
+  const PAGE_SIZE = 1000;
+  const logs: LogRow[] = [];
+  for (let page = 0; ; page++) {
+    let query = supabase
+      .from("daily_logs")
+      .select("machine_id, project_id, log_date, opening_reading, closing_reading, fuel_issued_liters, total_cost, fuel_source")
+      .gte("log_date", start)
+      .lte("log_date", end)
+      .order("log_date", { ascending: true })
+      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+    if (siteFilter) query = query.eq("project_id", siteFilter);
+    const { data: pageRows } = await query;
+    logs.push(...((pageRows ?? []) as LogRow[]));
+    if (!pageRows || pageRows.length < PAGE_SIZE) break;
+  }
   if (logs.length === 0) return [];
 
   const machineIds = [...new Set(logs.map((l) => l.machine_id))];
