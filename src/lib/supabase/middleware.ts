@@ -36,9 +36,25 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {
+    // A stale/invalid refresh token (leftover from a previous session, a
+    // rotated Supabase project, or a cleared user) makes supabase-js THROW
+    // here instead of returning a normal { error } result. Left uncaught,
+    // this crashes the middleware on every single request — including
+    // requests to /login itself, since the matcher covers nearly every
+    // path — which is what actually produced the reported 404 on /login,
+    // not a routing problem. Treat it as "not signed in" and drop the bad
+    // cookies so the browser stops resending a refresh token that will
+    // never work again.
+    user = null;
+    for (const cookie of request.cookies.getAll()) {
+      if (cookie.name.startsWith("sb-")) response.cookies.delete(cookie.name);
+    }
+  }
 
   const publicPaths = ["/login", "/auth"];
   // Routes that authenticate themselves and legitimately arrive without a
