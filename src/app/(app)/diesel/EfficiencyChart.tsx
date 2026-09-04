@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
   CartesianGrid,
   Legend,
@@ -38,6 +39,66 @@ export interface EfficiencyPoint {
       estimate using the machine's current reading, that will firm up as
       more distance/hours accumulate before the next fill. */
   provisional?: boolean;
+}
+
+/** Legend entries as links to each machine's own page — `dataKey` is the
+    machine_id we passed to each <Line>, so no extra lookup is needed. */
+function LinkedLegend({ payload }: { payload?: { value: string; color?: string; dataKey?: string | number }[] }) {
+  if (!payload || payload.length < 2) return null;
+  return (
+    <ul className="flex flex-wrap justify-center gap-x-4 gap-y-1 pt-2 text-xs">
+      {payload.map((entry) => (
+        <li key={String(entry.dataKey)} className="flex items-center gap-1.5">
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={{ background: entry.color }}
+          />
+          <Link
+            href={`/diesel/machines/${entry.dataKey}`}
+            className="text-ink-2 hover:text-accent hover:underline"
+          >
+            {entry.value}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** Tooltip with each machine's name linked to its own page — same
+    dataKey-as-machine_id trick as the legend above. */
+function LinkedTooltip({
+  active,
+  label,
+  payload,
+  unit,
+}: {
+  active?: boolean;
+  label?: string;
+  payload?: { value?: number; color?: string; dataKey?: string | number; name?: string }[];
+  unit: string;
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div
+      className="rounded-lg border p-2 text-xs"
+      style={{ background: "var(--color-surface)", borderColor: "var(--color-line)", color: "var(--color-ink)" }}
+    >
+      <div className="mb-1 font-medium">{label}</div>
+      {payload.map((entry) => (
+        <div key={String(entry.dataKey)} className="flex items-center gap-1.5">
+          <span className="inline-block h-2 w-2 rounded-full" style={{ background: entry.color }} />
+          <Link
+            href={`/diesel/machines/${entry.dataKey}`}
+            className="text-ink-2 hover:text-accent hover:underline"
+          >
+            {entry.name}
+          </Link>
+          <span>: {entry.value} {unit}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function EfficiencyChart({ points }: { points: EfficiencyPoint[] }) {
@@ -137,16 +198,8 @@ export function EfficiencyChart({ points }: { points: EfficiencyPoint[] }) {
               fontSize: 12,
             }}
           />
-          <Tooltip
-            contentStyle={{
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-line)",
-              borderRadius: 8,
-              color: "var(--color-ink)",
-              fontSize: 12,
-            }}
-          />
-          {machineIds.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
+          <Tooltip content={<LinkedTooltip unit={unit} />} wrapperStyle={{ pointerEvents: "auto" }} />
+          {machineIds.length > 1 && <Legend content={<LinkedLegend />} />}
           {machineIds.map((id, i) => (
             <Line
               key={id}
