@@ -25,10 +25,21 @@ export interface SiteStay {
   source: "logged" | "transferred" | "inferred";
   /** First date within the month this stay is evidenced by (a log date or
       the transfer date). Null only for a pure "inferred" stay with no
-      transfer date to anchor it. */
+      transfer date to anchor it. Doubles as "arrived around this date." */
   from_date: string | null;
   /** Last log date within the month at this site — "logged" stays only. */
   to_date: string | null;
+  /** Where it came from, if known — either a matching machine_transfers
+      row (possibly from an earlier month, found by looking backward from
+      from_date) or, for a stay that isn't the machine's first this month,
+      simply the previous stay's site (its own logs already prove that
+      move happened). Null when nothing pins down an origin. */
+  moved_from_label: string | null;
+  /** The transfer's own recorded date, when moved_from_label came from an
+      actual machine_transfers row rather than being inferred from the
+      previous stay (in which case from_date is the best approximation
+      already shown alongside the site). */
+  moved_from_date: string | null;
 }
 
 export interface MachineSiteMonth {
@@ -52,7 +63,7 @@ export async function fetchSiteHistory(
   monthEnd: string,
   siteFilter: string | null,
 ): Promise<MachineSiteMonth[]> {
-  const [{ data: machinesRaw }, { data: logsRaw }, { data: transfersRaw }, { data: projectsRaw }] =
+  const [{ data: machinesRaw }, { data: logsRaw }, { data: transfersRaw }, { data: originTransfersRaw }, { data: projectsRaw }] =
     await Promise.all([
       supabase
         .from("machines")
@@ -67,6 +78,14 @@ export async function fetchSiteHistory(
         .from("machine_transfers")
         .select("machine_id, from_project_id, to_project_id, transferred_at")
         .gte("transferred_at", monthStart)
+        .lte("transferred_at", monthEnd)
+        .order("transferred_at", { ascending: true }),
+      // Unbounded below monthEnd — used only to answer "where did the
+      // month's FIRST stay come from," which may well be a transfer from
+      // an earlier month, not this one.
+      supabase
+        .from("machine_transfers")
+        .select("machine_id, from_project_id, to_project_id, transferred_at")
         .lte("transferred_at", monthEnd)
         .order("transferred_at", { ascending: true }),
       supabase.from("projects").select("id, name, code"),
@@ -106,6 +125,28 @@ export async function fetchSiteHistory(
     (transfersByMachine.get(t.machine_id) ?? transfersByMachine.set(t.machine_id, []).get(t.machine_id)!).push(t);
   }
 
+  // All transfers up to month end, ascending — used to find what a
+  // machine's month-opening site was transferred FROM, even if that
+  // transfer happened before this month.
+  const originTransfersByMachine = new Map<string, TransferRow[]>();
+  for (const t of (originTransfersRaw ?? []) as TransferRow[]) {
+    (originTransfersByMachine.get(t.machine_id) ?? originTransfersByMachine.set(t.machine_id, []).get(t.machine_id)!).push(t);
+  }
+  function originOf(
+    machineId: string,
+    intoProjectId: string,
+    onOrBefore: string,
+  ): { label: string; date: string } | null {
+    const list = originTransfersByMachine.get(machineId) ?? [];
+    let best: TransferRow | null = null;
+    for (const t of list) {
+      if (t.to_project_id === intoProjectId && t.transferred_at <= onOrBefore) {
+        if (!best || t.transferred_at > best.transferred_at) best = t;
+      }
+    }
+    return best?.from_project_id ? { label: labelFor(best.from_project_id), date: best.transferred_at } : null;
+  }
+
   const results: MachineSiteMonth[] = [];
   for (const m of (machinesRaw ?? []) as MachineRow[]) {
     const logged = loggedSitesByMachine.get(m.id) ?? [];
@@ -119,6 +160,8 @@ export async function fetchSiteHistory(
         source: "logged" as const,
         from_date: s.from_date,
         to_date: s.to_date,
+        moved_from_label: null,
+        moved_from_date: null,
       }));
     } else if (transfers.length > 0) {
       stays = transfers.map((t) => ({
@@ -127,6 +170,8 @@ export async function fetchSiteHistory(
         source: "transferred" as const,
         from_date: t.transferred_at,
         to_date: null,
+        moved_from_label: null,
+        moved_from_date: null,
       }));
     } else if (m.deployed_at && m.deployed_at <= monthEnd) {
       // No activity this month at all — fall back to "still at its current
@@ -140,6 +185,8 @@ export async function fetchSiteHistory(
           source: "inferred",
           from_date: m.deployed_at >= monthStart ? m.deployed_at : null,
           to_date: null,
+          moved_from_label: null,
+          moved_from_date: null,
         },
       ];
     } else {
@@ -148,6 +195,24 @@ export async function fetchSiteHistory(
 
     if (stays.length === 0) continue;
     if (siteFilter && !stays.some((s) => s.project_id === siteFilter)) continue;
+
+    // Fill in where each stay was moved FROM: the first stay's origin comes
+    // from the closest matching transfer at or before it (possibly from an
+    // earlier month); every later stay in the same month is provably a
+    // move from whatever the previous stay was, straight from this
+    // machine's own logs.
+    stays.forEach((s, i) => {
+      if (i === 0) {
+        const origin = originOf(m.id, s.project_id, s.from_date ?? monthEnd);
+        s.moved_from_label = origin?.label ?? null;
+        s.moved_from_date = origin?.date ?? null;
+      } else {
+        // Later in the same month — the previous stay IS the origin,
+        // proven by this machine's own logs, even with no transfer row.
+        s.moved_from_label = stays[i - 1].site_label;
+        s.moved_from_date = null;
+      }
+    });
 
     results.push({
       machine_id: m.id,

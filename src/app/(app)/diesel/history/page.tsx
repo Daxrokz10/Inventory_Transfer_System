@@ -29,7 +29,7 @@ function monthRange(month: string): { start: string; end: string } {
 export default async function SiteHistoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; site?: string }>;
+  searchParams: Promise<{ month?: string; site?: string; q?: string }>;
 }) {
   const sp = await searchParams;
   const supabase = await createClient();
@@ -46,11 +46,22 @@ export default async function SiteHistoryPage({
   const month = isMonth(sp.month) ? sp.month! : new Date().toISOString().slice(0, 7);
   const { start, end } = monthRange(month);
   const siteFilter = sp.site || null;
+  const q = (sp.q ?? "").trim().toLowerCase();
 
-  const [{ data: projects }, rows] = await Promise.all([
+  const [{ data: projects }, allRows] = await Promise.all([
     supabase.from("projects").select("id, name, code").order("name"),
     fetchSiteHistory(supabase, start, end, siteFilter),
   ]);
+
+  // Search across name, type, plate, and site label — same fields the
+  // Machinery page's search already covers, so the habit carries over.
+  const rows = q
+    ? allRows.filter((r) =>
+        [r.machine_name, r.machine_type, r.registration_no, ...r.stays.map((s) => s.site_label)]
+          .filter(Boolean)
+          .some((v) => v!.toLowerCase().includes(q)),
+      )
+    : allRows;
 
   const movedCount = rows.filter((r) => r.stays.length > 1).length;
 
@@ -75,6 +86,16 @@ export default async function SiteHistoryPage({
             </option>
           ))}
         </Select>
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-2">
+          Search
+          <Input
+            type="search"
+            name="q"
+            defaultValue={sp.q ?? ""}
+            placeholder="Machine, plate, type, site…"
+            className="min-w-56"
+          />
+        </label>
         <Button type="submit" variant="secondary" size="sm">
           Apply
         </Button>
@@ -101,7 +122,13 @@ export default async function SiteHistoryPage({
             {rows.length === 0 ? (
               <tr>
                 <TD colSpan={4}>
-                  <EmptyState message={`No machines have a known site for ${month} yet.`} />
+                  <EmptyState
+                    message={
+                      q
+                        ? `No machines match "${sp.q}" for ${month}.`
+                        : `No machines have a known site for ${month} yet.`
+                    }
+                  />
                 </TD>
               </tr>
             ) : (
@@ -118,16 +145,26 @@ export default async function SiteHistoryPage({
                   </TD>
                   <TD className="text-ink-2">{r.machine_type}</TD>
                   <TD>
-                    <div className="flex flex-col gap-1">
+                    <div className="flex flex-col gap-2">
                       {r.stays.map((s, i) => (
-                        <div key={s.project_id + i} className="flex items-center gap-1.5">
-                          <span className="font-medium">{s.site_label}</span>
-                          {(s.from_date || s.to_date) && (
-                            <span className="font-mono text-xs tabular-nums text-ink-3">
-                              {s.from_date === s.to_date || !s.to_date
-                                ? s.from_date
-                                : `${s.from_date} → ${s.to_date}`}
-                            </span>
+                        <div key={s.project_id + i}>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium">{s.site_label}</span>
+                            {(s.from_date || s.to_date) && (
+                              <span className="font-mono text-xs tabular-nums text-ink-3">
+                                {s.from_date === s.to_date || !s.to_date
+                                  ? s.from_date
+                                  : `${s.from_date} → ${s.to_date}`}
+                              </span>
+                            )}
+                          </div>
+                          {s.moved_from_label && (
+                            <div className="text-xs text-ink-3">
+                              transferred from <span className="text-ink-2">{s.moved_from_label}</span>
+                              {(s.moved_from_date ?? s.from_date) && (
+                                <> on {s.moved_from_date ?? s.from_date}</>
+                              )}
+                            </div>
                           )}
                         </div>
                       ))}
