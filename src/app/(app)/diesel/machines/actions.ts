@@ -508,6 +508,14 @@ export async function transferMachine(formData: FormData): Promise<void> {
   const project_id = String(formData.get("project_id") ?? "");
   if (!machine_id || !project_id) return;
 
+  // Needed to record where it moved FROM — fetched before the update
+  // overwrites it below.
+  const { data: before } = await supabase
+    .from("machines")
+    .select("project_id")
+    .eq("id", machine_id)
+    .single();
+
   // A transfer starts a fresh deployment at the new site: reset the start
   // date and clear the old site's SO deadline (a new one is set there if
   // needed) so a moved machine never carries a stale overdue flag.
@@ -520,6 +528,18 @@ export async function transferMachine(formData: FormData): Promise<void> {
     })
     .eq("id", machine_id);
 
+  // Audit trail for the History page — exact date, not an inference from
+  // whether fuel happened to get logged that month.
+  if (before && before.project_id !== project_id) {
+    await supabase.from("machine_transfers").insert({
+      machine_id,
+      from_project_id: before.project_id,
+      to_project_id: project_id,
+      transferred_by: user.id,
+    });
+  }
+
   revalidatePath("/diesel/machines");
   revalidatePath("/diesel");
+  revalidatePath("/diesel/history");
 }

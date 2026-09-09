@@ -53,6 +53,7 @@ const dieselAdminNav: NavItem[] = [
   { href: "/diesel/anomalies", label: "Anomalies" },
   { href: "/diesel/planning", label: "Planning" },
   { href: "/diesel/reports", label: "Reports" },
+  { href: "/diesel/history", label: "Site History" },
   { href: "/diesel/sites", label: "Sites" },
   { href: "/diesel/visualization", label: "Visualization" },
   { href: "/diesel/assistant", label: "Assistant" },
