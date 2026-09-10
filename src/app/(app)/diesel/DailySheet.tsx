@@ -35,7 +35,9 @@ function daysSince(lastDate: string, today: string): number {
   return Math.round(ms / 86_400_000);
 }
 
-type FuelSource = "on_site" | "outside";
+/** "on_site" = this site's own barrels; "outside" = a pump not tied to any
+    site's stock; "stock:<projectId>" = a sister group site's barrels. */
+type FuelSource = "on_site" | "outside" | `stock:${string}`;
 
 interface RowState {
   status: Status;
@@ -54,6 +56,7 @@ export function DailySheet({
   lastReportedByMachine = {},
   homeProjectId = null,
   siteLabelById = {},
+  stockSites = [],
 }: {
   machines: Machine[];
   existing: Record<string, DailyLog>;
@@ -69,6 +72,10 @@ export function DailySheet({
       shown here to make that visible rather than silently mixed in. */
   homeProjectId?: string | null;
   siteLabelById?: Record<string, string>;
+  /** Other sites in the caller's group — offered as a fuel source when a
+      vehicle filled from one of their barrels, so the debit lands on
+      that site's register instead of this one's. */
+  stockSites?: { id: string; label: string }[];
 }) {
   const editable = useMemo(
     () => machines.filter((m) => !existing[m.id]),
@@ -108,8 +115,11 @@ export function DailySheet({
       status: r.status,
       closing_reading: normal && !m.meter_broken ? num(r.reading) : null,
       fuel_issued_liters: fuel,
-      // Source tracked at every site now, only meaningful with fuel.
-      fuel_source: fuel > 0 ? r.source : null,
+      // Source tracked at every site now, only meaningful with fuel. A
+      // sister site's barrels are still an on-site fill — just not ours.
+      fuel_source: fuel > 0 ? (r.source === "outside" ? "outside" : "on_site") : null,
+      stock_project_id:
+        fuel > 0 && r.source.startsWith("stock:") ? r.source.slice("stock:".length) : null,
       remarks: r.remarks.trim() || null,
     };
   });
@@ -199,6 +209,11 @@ export function DailySheet({
                       {log.fuel_source && log.fuel_source !== "on_site" && (
                         <span className="ml-1 rounded bg-surface-2 px-1 py-0.5 font-sans text-[10px] uppercase tracking-wide text-ink-3">
                           {log.fuel_source === "shraddha" ? "Shraddha" : "offsite"}
+                        </span>
+                      )}
+                      {log.stock_project_id && log.stock_project_id !== homeProjectId && (
+                        <span className="ml-1 rounded bg-surface-2 px-1 py-0.5 font-sans text-[10px] uppercase tracking-wide text-ink-3">
+                          {stockSites.find((s) => s.id === log.stock_project_id)?.label ?? "other site"} stock
                         </span>
                       )}
                     </TD>
@@ -306,10 +321,15 @@ export function DailySheet({
                             onChange={(e) =>
                               set(m.id, { source: e.target.value as FuelSource })
                             }
-                            className="w-28 text-xs"
+                            className="w-36 text-xs"
                             aria-label={`${m.name} fuel source`}
                           >
                             <option value="on_site">On site</option>
+                            {stockSites.map((s) => (
+                              <option key={s.id} value={`stock:${s.id}`}>
+                                From {s.label} stock
+                              </option>
+                            ))}
                             <option value="outside">Offsite</option>
                           </Select>
                         )}

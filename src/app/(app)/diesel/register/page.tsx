@@ -136,7 +136,7 @@ export default async function DieselRegisterPage({
           <p className="mt-2 font-mono text-xl font-semibold tabular-nums text-danger">−{L(register.outwardLiters)}</p>
           {register.outwardNotFromStockLiters > 0 && (
             <p className="mt-1 text-xs text-ink-3">
-              +{L(register.outwardNotFromStockLiters)} offsite/Shraddha — not from site stock
+              +{L(register.outwardNotFromStockLiters)} offsite / other site&apos;s stock — not from this site
             </p>
           )}
         </Card>
@@ -195,6 +195,8 @@ export default async function DieselRegisterPage({
                         </Badge>
                         {r.fuelSource === "shraddha" && <Badge tone="warn">Shraddha</Badge>}
                         {r.fuelSource === "outside" && <Badge tone="neutral">Offsite</Badge>}
+                        {r.drawnFrom && <Badge tone="neutral">From {r.drawnFrom} stock</Badge>}
+                        {r.suppliedTo && <Badge tone="accent">For {r.suppliedTo}</Badge>}
                       </div>
                     )}
                   </TD>
@@ -243,7 +245,11 @@ export default async function DieselRegisterPage({
         Running balance = opening stock + inward − outward from this site's own stock only. A fill
         tagged <span className="font-medium text-ink-2">Offsite</span> or{" "}
         <span className="font-medium text-ink-2">Shraddha</span> is still listed here for a complete
-        record, but it never drew from this site's barrels, so it doesn't move the balance. It's a
+        record, but it never drew from this site's barrels, so it doesn't move the balance. In a site
+        group, a fill tagged <span className="font-medium text-ink-2">From J-… stock</span> came out of
+        that sister site&apos;s barrels (debited there, not here), and one tagged{" "}
+        <span className="font-medium text-ink-2">For J-…</span> was filed by a sister site but drawn
+        from this site&apos;s barrels (debited here). It's a
         shown figure, not an alarm — its accuracy depends on every barrel and every on-site fill
         being logged. A drift from the physical count means something wasn't entered (or leaked);
         re-set the opening stock after a fresh count to re-anchor it.

@@ -22,6 +22,9 @@ interface SheetRow {
       stock. "shraddha" is a legacy value — no longer written, but still
       read from historical logs. */
   fuel_source?: "on_site" | "shraddha" | "outside" | null;
+  /** With an on-site fill: a sister group site whose barrels supplied it,
+      when that isn't the filer's own site. Omitted/null = own stock. */
+  stock_project_id?: string | null;
 }
 
 // Save the daily sheet for one or more machines. Only today's date is
@@ -150,6 +153,27 @@ export async function saveDailySheet(
     .single();
   const prices = await getPricesForCity(cityForState(project?.state ?? null), log_date);
 
+  // A fill drawn from a sister site's barrels debits THAT site's register,
+  // not ours — but only a site actually in the filer's own group qualifies.
+  const requestedStockSites = [
+    ...new Set(
+      rows
+        .map((r) => r.stock_project_id)
+        .filter((id): id is string => !!id && id !== projectId),
+    ),
+  ];
+  if (requestedStockSites.length > 0) {
+    const { data: groupRows } = await admin
+      .from("projects")
+      .select("id, group_id")
+      .in("id", [projectId, ...requestedStockSites]);
+    const groupOf = new Map((groupRows ?? []).map((p) => [p.id as string, p.group_id as string | null]));
+    const myGroup = groupOf.get(projectId);
+    if (!myGroup || requestedStockSites.some((id) => groupOf.get(id) !== myGroup)) {
+      return "Fuel can only be drawn from a site in your own group.";
+    }
+  }
+
   const inserts = rows.map((r) => {
     const m = machineById.get(r.machine_id)!;
     const rate = m.fuel_type === "petrol" ? prices.petrol : prices.diesel;
@@ -175,6 +199,14 @@ export async function saveDailySheet(
       // on-site stock unless the client explicitly says the vehicle went
       // outside — re-derived here rather than trusted from the client.
       fuel_source: fuel_issued_liters > 0 ? (r.fuel_source === "outside" ? "outside" : "on_site") : null,
+      // Only for an on-site fill from a sister site's barrels (validated
+      // against the filer's group above) — left off entirely otherwise.
+      ...(fuel_issued_liters > 0 &&
+      r.fuel_source !== "outside" &&
+      r.stock_project_id &&
+      r.stock_project_id !== projectId
+        ? { stock_project_id: r.stock_project_id }
+        : {}),
       entered_by: user.id,
     };
   });

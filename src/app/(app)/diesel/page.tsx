@@ -457,6 +457,24 @@ export default async function DieselPage({
       siteLabelById[p.id] = p.code ? `${p.code} · ${p.name}` : p.name;
     }
 
+    // Sister sites in the caller's group — a vehicle may drive over and
+    // fill from one of their barrels, which must debit THEIR register.
+    const { data: homeRow } = homeProjectId
+      ? await supabase.from("projects").select("group_id").eq("id", homeProjectId).single()
+      : { data: null };
+    const { data: sisterRaw } = homeRow?.group_id
+      ? await supabase
+          .from("projects")
+          .select("id, name, code")
+          .eq("group_id", homeRow.group_id)
+          .eq("is_active", true)
+          .neq("id", homeProjectId!)
+          .order("code")
+      : { data: [] };
+    const stockSites = ((sisterRaw ?? []) as { id: string; name: string; code: string | null }[]).map(
+      (p) => ({ id: p.id, label: p.code ?? p.name }),
+    );
+
     return (
       <div className="space-y-6">
         <PageHeader
@@ -488,6 +506,7 @@ export default async function DieselPage({
           lastReportedByMachine={lastReportedByMachine}
           homeProjectId={homeProjectId}
           siteLabelById={siteLabelById}
+          stockSites={stockSites}
         />
 
         <Card className="p-0">

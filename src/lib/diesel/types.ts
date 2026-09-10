@@ -93,6 +93,11 @@ export interface DailyLog {
       Only 'on_site' (and legacy null) fills count against the site's
       barrel balance in the Diesel Register — see register.ts. */
   fuel_source: "on_site" | "shraddha" | "outside" | null;
+  /** For an 'on_site' fill: whose barrel stock supplied it. Null = the
+      filing site's own (project_id); set = a sister site in the same group
+      (the vehicle drove over and filled from their barrels). Only the
+      register debit follows this — usage/cost stay with project_id. */
+  stock_project_id?: string | null;
 }
 
 export interface SiteRequirement {

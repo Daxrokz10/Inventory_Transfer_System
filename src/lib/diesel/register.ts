@@ -33,6 +33,15 @@ export interface RegisterRow {
       and reduce the balance; "shraddha"/"outside" fills never touched this
       site's stock, so they're listed but don't move the balance. */
   fuelSource: "on_site" | "shraddha" | "outside" | null;
+  /** Outward only. Whether this fill actually came out of THIS site's
+      barrels — what moves the balance. */
+  fromStock: boolean;
+  /** Outward only, group sites. This site filed it, but the vehicle filled
+      from this sister site's barrels — listed, not debited here. */
+  drawnFrom: string | null;
+  /** Outward only, group sites. A sister site filed it, but the fuel came
+      from THIS site's barrels — debited here. */
+  suppliedTo: string | null;
   runningBalance: number;
   note: string | null;
 }
@@ -90,17 +99,32 @@ export async function buildDieselRegister(
   // OUTWARD — diesel issued to machines. Join the machine for
   // name/plate/owner/fuel — a petrol-fueled machine's log never touched
   // this site's diesel stock, so it's excluded below rather than counted.
-  const { data: logsRaw } = await supabase
+  // Includes fills filed by a sister group site but drawn from THIS site's
+  // barrels (stock_project_id). Falls back to the pre-0033 shape if that
+  // column isn't in the database yet.
+  const logCols =
+    "log_date, project_id, fuel_issued_liters, opening_reading, closing_reading, fuel_source, machines(name, registration_no, ownership, vendor_name, fuel_type)";
+  const withStock = await supabase
     .from("daily_logs")
-    .select(
-      "log_date, fuel_issued_liters, opening_reading, closing_reading, fuel_source, machines(name, registration_no, ownership, vendor_name, fuel_type)",
-    )
-    .eq("project_id", projectId)
+    .select(`${logCols}, stock_project_id`)
+    .or(`project_id.eq.${projectId},stock_project_id.eq.${projectId}`)
     .gt("fuel_issued_liters", 0)
     .lte("log_date", range.end);
+  const logsRaw: unknown[] | null = withStock.error
+    ? (
+        await supabase
+          .from("daily_logs")
+          .select(logCols)
+          .eq("project_id", projectId)
+          .gt("fuel_issued_liters", 0)
+          .lte("log_date", range.end)
+      ).data
+    : withStock.data;
 
   type LogRow = {
     log_date: string;
+    project_id: string;
+    stock_project_id?: string | null;
     fuel_issued_liters: number;
     opening_reading: number | null;
     closing_reading: number | null;
@@ -135,15 +159,44 @@ export async function buildDieselRegister(
     endReading: null,
     meterBroken: false,
     fuelSource: null,
+    fromStock: false,
+    drawnFrom: null,
+    suppliedTo: null,
     runningBalance: 0,
     note: r.note,
   }));
 
-  const outward: RegisterRow[] = ((logsRaw ?? []) as unknown as LogRow[])
-    .filter((l) => (l.machines?.fuel_type ?? "diesel") === "diesel")
+  const logs = ((logsRaw ?? []) as unknown as LogRow[]).filter(
+    (l) => (l.machines?.fuel_type ?? "diesel") === "diesel",
+  );
+
+  // Codes for any sister site on the other side of a cross-site fill.
+  const otherSiteIds = [
+    ...new Set(
+      logs.flatMap((l) => [l.project_id, l.stock_project_id ?? null]).filter(
+        (id): id is string => !!id && id !== projectId,
+      ),
+    ),
+  ];
+  const { data: otherSites } = otherSiteIds.length
+    ? await supabase.from("projects").select("id, code, name").in("id", otherSiteIds)
+    : { data: [] };
+  const siteCode = new Map(
+    ((otherSites ?? []) as { id: string; code: string | null; name: string }[]).map((p) => [
+      p.id,
+      p.code ?? p.name,
+    ]),
+  );
+
+  const outward: RegisterRow[] = logs
     .map((l) => {
       const m = l.machines;
       const owner = m?.ownership === "external" ? (m.vendor_name ?? "Hired") : "SGC";
+      // Only a fill drawn from barrels moves a balance, and only the
+      // balance of whichever site's barrels they were.
+      const onSite = l.fuel_source == null || l.fuel_source === "on_site";
+      const stockSite = l.stock_project_id ?? l.project_id;
+      const filedHere = l.project_id === projectId;
       return {
         date: l.log_date,
         type: "OUTWARD" as const,
@@ -160,6 +213,12 @@ export async function buildDieselRegister(
         endReading: l.closing_reading != null ? Number(l.closing_reading) : null,
         meterBroken: l.closing_reading == null,
         fuelSource: l.fuel_source,
+        fromStock: onSite && stockSite === projectId,
+        drawnFrom:
+          onSite && filedHere && stockSite !== projectId
+            ? (siteCode.get(stockSite) ?? "another site")
+            : null,
+        suppliedTo: !filedHere ? (siteCode.get(l.project_id) ?? "another site") : null,
         runningBalance: 0,
         note: null,
       };
@@ -190,11 +249,11 @@ export async function buildDieselRegister(
       }
     } else {
       // Only a fill drawn from this site's own barrels moves the balance —
-      // a Shraddha-pump or offsite fill never touched this site's stock.
-      const fromStock = row.fuelSource == null || row.fuelSource === "on_site";
-      if (fromStock) balance -= row.liters;
+      // a Shraddha-pump, offsite, or sister-site-stock fill never touched
+      // this site's barrels.
+      if (row.fromStock) balance -= row.liters;
       if (shown) {
-        if (fromStock) outwardLiters += row.liters;
+        if (row.fromStock) outwardLiters += row.liters;
         else outwardNotFromStockLiters += row.liters;
       }
     }
@@ -251,7 +310,11 @@ export function registerToCsv(result: RegisterResult): string {
           ? "Shraddha pump"
           : r.fuelSource === "outside"
             ? "Offsite (not from site stock)"
-            : "Site stock"
+            : r.drawnFrom
+              ? `${r.drawnFrom} stock (not from this site)`
+              : r.suppliedTo
+                ? `Site stock — issued for ${r.suppliedTo}`
+                : "Site stock"
         : "";
     lines.push(
       [
