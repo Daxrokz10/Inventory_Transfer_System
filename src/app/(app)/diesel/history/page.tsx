@@ -158,6 +158,11 @@ export default async function SiteHistoryPage({
                               </span>
                             )}
                           </div>
+                          {s.filed_from_labels.length > 0 && (
+                            <div className="text-xs text-ink-3">
+                              fuel filed from {s.filed_from_labels.join(", ")} login
+                            </div>
+                          )}
                           {s.moved_from_label && (
                             <div className="text-xs text-ink-3">
                               transferred from <span className="text-ink-2">{s.moved_from_label}</span>

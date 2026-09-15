@@ -40,6 +40,10 @@ export interface SiteStay {
       previous stay (in which case from_date is the best approximation
       already shown alongside the site). */
   moved_from_date: string | null;
+  /** Sister group sites whose account filed this stay's fuel logs — the
+      machine was placed at its own registered site regardless, since in a
+      group one site's login often files for all of them. */
+  filed_from_labels: string[];
 }
 
 export interface MachineSiteMonth {
@@ -63,38 +67,66 @@ export async function fetchSiteHistory(
   monthEnd: string,
   siteFilter: string | null,
 ): Promise<MachineSiteMonth[]> {
-  const [{ data: machinesRaw }, { data: logsRaw }, { data: transfersRaw }, { data: originTransfersRaw }, { data: projectsRaw }] =
-    await Promise.all([
-      supabase
-        .from("machines")
-        .select("id, name, registration_no, machine_type, ownership, is_active, project_id, deployed_at"),
-      supabase
+  // A month's fleet-wide logs run well past PostgREST's silent 1000-row
+  // cap, so page through them rather than lose the month's tail.
+  async function fetchMonthLogs(): Promise<unknown[]> {
+    const all: unknown[] = [];
+    for (let page = 0; ; page++) {
+      const { data } = await supabase
         .from("daily_logs")
         .select("machine_id, project_id, log_date")
         .gte("log_date", monthStart)
         .lte("log_date", monthEnd)
-        .order("log_date", { ascending: true }),
+        .order("log_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(page * 1000, page * 1000 + 999);
+      all.push(...(data ?? []));
+      if (!data || data.length < 1000) return all;
+    }
+  }
+
+  const [{ data: machinesRaw }, logsRaw, { data: transfersRaw }, { data: allTransfersRaw }, { data: projectsRaw }] =
+    await Promise.all([
+      supabase
+        .from("machines")
+        .select("id, name, registration_no, machine_type, ownership, is_active, project_id, deployed_at, created_at")
+        .range(0, 9999),
+      fetchMonthLogs(),
       supabase
         .from("machine_transfers")
         .select("machine_id, from_project_id, to_project_id, transferred_at")
         .gte("transferred_at", monthStart)
         .lte("transferred_at", monthEnd)
         .order("transferred_at", { ascending: true }),
-      // Unbounded below monthEnd — used only to answer "where did the
-      // month's FIRST stay come from," which may well be a transfer from
-      // an earlier month, not this one.
+      // Every transfer ever — used to answer "where did the month's FIRST
+      // stay come from" (maybe an earlier month) and "which site was this
+      // machine registered to on a given date" (needs later ones too).
       supabase
         .from("machine_transfers")
         .select("machine_id, from_project_id, to_project_id, transferred_at")
-        .lte("transferred_at", monthEnd)
-        .order("transferred_at", { ascending: true }),
-      supabase.from("projects").select("id, name, code"),
+        .order("transferred_at", { ascending: true })
+        .range(0, 9999),
+      supabase.from("projects").select("id, name, code, group_id, site_groups(share_external)"),
     ]);
 
   const projectLabel = new Map(
     (projectsRaw ?? []).map((p) => [p.id as string, p.code ? `${p.code} · ${p.name}` : (p.name as string)]),
   );
   const labelFor = (id: string) => projectLabel.get(id) ?? "—";
+  // Only "shared" groups (share_external — one person runs every site in
+  // it, e.g. AMNS filing everything from J-0081) break the link between
+  // filing site and location. In an internal-fleet group like Dahej, each
+  // site files for the machines physically there, so the filing site IS
+  // the location and is used as-is.
+  const sharedGroupOf = new Map(
+    ((projectsRaw ?? []) as unknown as {
+      id: string;
+      group_id: string | null;
+      site_groups: { share_external: boolean } | null;
+    }[]).map((p) => [p.id, p.group_id && p.site_groups?.share_external ? p.group_id : null]),
+  );
+  const sameSharedGroup = (a: string, b: string) =>
+    a === b || (!!sharedGroupOf.get(a) && sharedGroupOf.get(a) === sharedGroupOf.get(b));
 
   type LogRow = { machine_id: string; project_id: string; log_date: string };
   type TransferRow = { machine_id: string; from_project_id: string | null; to_project_id: string; transferred_at: string };
@@ -107,16 +139,47 @@ export async function fetchSiteHistory(
     is_active: boolean;
     project_id: string;
     deployed_at: string | null;
+    created_at: string;
   };
 
-  // Ordered, deduped project_ids per machine with their first/last log date
-  // this month — logs already arrive oldest-first from the query above.
-  const loggedSitesByMachine = new Map<string, { project_id: string; from_date: string; to_date: string }[]>();
-  for (const l of (logsRaw ?? []) as LogRow[]) {
+  const machines = (machinesRaw ?? []) as MachineRow[];
+  const machineById = new Map(machines.map((m) => [m.id, m]));
+
+  const allTransfersByMachine = new Map<string, TransferRow[]>();
+  for (const t of (allTransfersRaw ?? []) as TransferRow[]) {
+    (allTransfersByMachine.get(t.machine_id) ?? allTransfersByMachine.set(t.machine_id, []).get(t.machine_id)!).push(t);
+  }
+
+  // The site a machine was registered to on a given date: the last
+  // transfer on or before it, else where the first later transfer moved
+  // it FROM, else (never transferred) its current site.
+  function registeredSiteOn(m: MachineRow, date: string): string {
+    const list = allTransfersByMachine.get(m.id) ?? [];
+    let last: TransferRow | null = null;
+    for (const t of list) if (t.transferred_at <= date) last = t;
+    if (last) return last.to_project_id;
+    const firstLater = list.find((t) => t.transferred_at > date);
+    return firstLater?.from_project_id ?? m.project_id;
+  }
+
+  // Where each log puts the machine. A log's project_id is the FILER's
+  // site — a real location signal, except inside a shared group where one
+  // site's account files for the whole group. There the machine is placed
+  // at its own registered site, and the filing site kept as a note.
+  const loggedSitesByMachine = new Map<
+    string,
+    { project_id: string; from_date: string; to_date: string; filed_from: Set<string> }[]
+  >();
+  for (const l of logsRaw as LogRow[]) {
+    const m = machineById.get(l.machine_id);
+    if (!m) continue;
+    const reg = registeredSiteOn(m, l.log_date);
+    const at = sameSharedGroup(l.project_id, reg) ? reg : l.project_id;
     const list = loggedSitesByMachine.get(l.machine_id) ?? [];
-    const existing = list.find((s) => s.project_id === l.project_id);
-    if (existing) existing.to_date = l.log_date;
-    else list.push({ project_id: l.project_id, from_date: l.log_date, to_date: l.log_date });
+    let stay = list.find((s) => s.project_id === at);
+    if (stay) stay.to_date = l.log_date;
+    else list.push((stay = { project_id: at, from_date: l.log_date, to_date: l.log_date, filed_from: new Set() }));
+    if (l.project_id !== at) stay.filed_from.add(l.project_id);
     loggedSitesByMachine.set(l.machine_id, list);
   }
 
@@ -125,19 +188,14 @@ export async function fetchSiteHistory(
     (transfersByMachine.get(t.machine_id) ?? transfersByMachine.set(t.machine_id, []).get(t.machine_id)!).push(t);
   }
 
-  // All transfers up to month end, ascending — used to find what a
-  // machine's month-opening site was transferred FROM, even if that
+  // What a machine's month-opening site was transferred FROM, even if that
   // transfer happened before this month.
-  const originTransfersByMachine = new Map<string, TransferRow[]>();
-  for (const t of (originTransfersRaw ?? []) as TransferRow[]) {
-    (originTransfersByMachine.get(t.machine_id) ?? originTransfersByMachine.set(t.machine_id, []).get(t.machine_id)!).push(t);
-  }
   function originOf(
     machineId: string,
     intoProjectId: string,
     onOrBefore: string,
   ): { label: string; date: string } | null {
-    const list = originTransfersByMachine.get(machineId) ?? [];
+    const list = allTransfersByMachine.get(machineId) ?? [];
     let best: TransferRow | null = null;
     for (const t of list) {
       if (t.to_project_id === intoProjectId && t.transferred_at <= onOrBefore) {
@@ -148,9 +206,12 @@ export async function fetchSiteHistory(
   }
 
   const results: MachineSiteMonth[] = [];
-  for (const m of (machinesRaw ?? []) as MachineRow[]) {
+  for (const m of machines) {
     const logged = loggedSitesByMachine.get(m.id) ?? [];
     const transfers = transfersByMachine.get(m.id) ?? [];
+    // Machines registered without a deploy date (e.g. a MISC placeholder)
+    // count as deployed from when they were added.
+    const deployedOn = m.deployed_at ?? m.created_at.slice(0, 10);
 
     let stays: SiteStay[];
     if (logged.length > 0) {
@@ -162,6 +223,7 @@ export async function fetchSiteHistory(
         to_date: s.to_date,
         moved_from_label: null,
         moved_from_date: null,
+        filed_from_labels: [...s.filed_from].map(labelFor),
       }));
     } else if (transfers.length > 0) {
       stays = transfers.map((t) => ({
@@ -172,21 +234,24 @@ export async function fetchSiteHistory(
         to_date: null,
         moved_from_label: null,
         moved_from_date: null,
+        filed_from_labels: [],
       }));
-    } else if (m.deployed_at && m.deployed_at <= monthEnd) {
-      // No activity this month at all — fall back to "still at its current
-      // site," but only when it was already deployed there before this
-      // month ended (otherwise we'd be guessing at a site it may not have
-      // reached yet).
+    } else if (deployedOn <= monthEnd) {
+      // No activity this month at all — fall back to "still at the site it
+      // was registered to then," but only when it was already deployed
+      // before this month ended (otherwise we'd be guessing at a site it
+      // may not have reached yet).
+      const site = registeredSiteOn(m, monthEnd);
       stays = [
         {
-          project_id: m.project_id,
-          site_label: labelFor(m.project_id),
+          project_id: site,
+          site_label: labelFor(site),
           source: "inferred",
-          from_date: m.deployed_at >= monthStart ? m.deployed_at : null,
+          from_date: deployedOn >= monthStart ? deployedOn : null,
           to_date: null,
           moved_from_label: null,
           moved_from_date: null,
+          filed_from_labels: [],
         },
       ];
     } else {
