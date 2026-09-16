@@ -26,14 +26,15 @@ export async function GET(req: NextRequest) {
   if (!site) return new Response("No site", { status: 400 });
   if (!/^\d{4}-\d{2}$/.test(month)) return new Response("Invalid month", { status: 400 });
 
+  const fuel = searchParams.get("fuel") === "petrol" ? "petrol" : "diesel";
   const { start, end } = monthRange(month);
-  const register = await buildDieselRegister(supabase, site, { start, end });
+  const register = await buildDieselRegister(supabase, site, { start, end }, fuel);
   const csv = registerToCsv(register);
 
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="diesel-register-${month}.csv"`,
+      "Content-Disposition": `attachment; filename="${fuel}-register-${month}.csv"`,
     },
   });
 }

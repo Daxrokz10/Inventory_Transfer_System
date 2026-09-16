@@ -17,7 +17,7 @@ const L = (n: number) => `${n.toLocaleString("en-IN", { maximumFractionDigits: 1
 export default async function DieselRegisterPage({
   searchParams,
 }: {
-  searchParams: Promise<{ month?: string; site?: string }>;
+  searchParams: Promise<{ month?: string; site?: string; fuel?: string }>;
 }) {
   const sp = await searchParams;
   const supabase = await createClient();
@@ -33,6 +33,10 @@ export default async function DieselRegisterPage({
 
   const today = new Date().toISOString().slice(0, 10);
   const month = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? sp.month! : today.slice(0, 7);
+  // Petrol is a separate stock with its own receipts and fills — shown in
+  // its own ledger rather than mixed into the diesel balance.
+  const fuel: "diesel" | "petrol" = sp.fuel === "petrol" ? "petrol" : "diesel";
+  const fuelLabel = fuel === "petrol" ? "Petrol" : "Diesel";
 
   // Admin picks a site; supervisors are pinned to their own.
   const { data: siteList } = isAdmin
@@ -74,21 +78,23 @@ export default async function DieselRegisterPage({
   const { start, end } = monthRange(month);
   const [{ data: site }, { data: openingRaw }, register] = await Promise.all([
     supabase.from("projects").select("id, name, code").eq("id", projectId).single(),
-    supabase.from("diesel_opening_stock").select("liters, as_of").eq("project_id", projectId).maybeSingle(),
-    buildDieselRegister(supabase, projectId, { start, end }),
+    fuel === "diesel"
+      ? supabase.from("diesel_opening_stock").select("liters, as_of").eq("project_id", projectId).maybeSingle()
+      : Promise.resolve({ data: null }),
+    buildDieselRegister(supabase, projectId, { start, end }, fuel),
   ]);
 
   const opening = openingRaw ? { liters: Number(openingRaw.liters), as_of: openingRaw.as_of } : null;
-  const exportHref = `/diesel/register/export?site=${projectId}&month=${month}`;
+  const exportHref = `/diesel/register/export?site=${projectId}&month=${month}&fuel=${fuel}`;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Diesel Register"
+        title={`${fuelLabel} Register`}
         subtitle={
           <>
             {site?.code ? `${site.code} · ` : ""}
-            {site?.name ?? "—"} — inward, outward &amp; running barrel balance
+            {site?.name ?? "—"} — inward, outward &amp; running {fuelLabel.toLowerCase()} balance
           </>
         }
       />
@@ -109,6 +115,13 @@ export default async function DieselRegisterPage({
             Month
             <Input type="month" name="month" defaultValue={month} className="min-w-40" />
           </label>
+          <label className="flex flex-col gap-1 text-xs font-medium text-ink-2">
+            Fuel
+            <Select name="fuel" defaultValue={fuel} className="min-w-32">
+              <option value="diesel">Diesel</option>
+              <option value="petrol">Petrol</option>
+            </Select>
+          </label>
           <Button type="submit" variant="secondary" size="sm">
             Apply
           </Button>
@@ -118,7 +131,11 @@ export default async function DieselRegisterPage({
             </Button>
           </a>
         </form>
-        <OpeningStockForm projectId={projectId} current={opening} today={today} />
+        {/* The opening count anchors diesel only — petrol has no physical
+            barrel count, so its balance runs from recorded receipts alone. */}
+        {fuel === "diesel" && (
+          <OpeningStockForm projectId={projectId} current={opening} today={today} />
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
@@ -147,7 +164,11 @@ export default async function DieselRegisterPage({
         <Card>
           <CardLabel>Opening anchor</CardLabel>
           <p className="mt-2 text-sm text-ink-2">
-            {opening ? (
+            {fuel === "petrol" ? (
+              <span className="text-ink-3">
+                not used for petrol — balance is from recorded receipts only
+              </span>
+            ) : opening ? (
               <>
                 {L(opening.liters)}
                 <span className="block text-xs text-ink-3">as of {opening.as_of}</span>
@@ -178,7 +199,7 @@ export default async function DieselRegisterPage({
             {register.rows.length === 0 ? (
               <tr>
                 <TD colSpan={9}>
-                  <EmptyState message={`No diesel movements recorded for ${month}.`} />
+                  <EmptyState message={`No ${fuelLabel.toLowerCase()} movements recorded for ${month}.`} />
                 </TD>
               </tr>
             ) : (
@@ -242,17 +263,20 @@ export default async function DieselRegisterPage({
       </Card>
 
       <p className="text-xs text-ink-3">
-        Running balance = opening stock + inward − outward from this site's own stock only. A fill
-        tagged <span className="font-medium text-ink-2">Offsite</span> or{" "}
+        Running balance = opening stock + inward − outward from this site&apos;s own stock only, for{" "}
+        {fuelLabel.toLowerCase()} alone — diesel and petrol are separate stocks, each with its own
+        ledger. A fill tagged <span className="font-medium text-ink-2">Offsite</span> or{" "}
         <span className="font-medium text-ink-2">Shraddha</span> is still listed here for a complete
-        record, but it never drew from this site's barrels, so it doesn't move the balance. In a site
-        group, a fill tagged <span className="font-medium text-ink-2">From J-… stock</span> came out of
-        that sister site&apos;s barrels (debited there, not here), and one tagged{" "}
+        record, but it never drew from this site&apos;s barrels, so it does not move the balance. In a
+        site group, a fill tagged <span className="font-medium text-ink-2">From J-… stock</span> came
+        out of that sister site&apos;s barrels (debited there, not here), and one tagged{" "}
         <span className="font-medium text-ink-2">For J-…</span> was filed by a sister site but drawn
-        from this site&apos;s barrels (debited here). It's a
-        shown figure, not an alarm — its accuracy depends on every barrel and every on-site fill
-        being logged. A drift from the physical count means something wasn't entered (or leaked);
-        re-set the opening stock after a fresh count to re-anchor it.
+        from this site&apos;s barrels (debited here). It is a shown figure, not an alarm — its accuracy
+        depends on every delivery and every on-site fill being logged. A drift from the physical count
+        means something was not entered (or leaked);{" "}
+        {fuel === "diesel"
+          ? "re-set the opening stock after a fresh count to re-anchor it."
+          : "petrol has no opening count, so its balance runs from recorded receipts alone."}
       </p>
     </div>
   );

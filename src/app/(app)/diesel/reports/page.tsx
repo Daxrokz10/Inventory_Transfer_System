@@ -24,7 +24,7 @@ const inr = (n: number) =>
 export default async function DieselReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ start?: string; end?: string; site?: string }>;
+  searchParams: Promise<{ start?: string; end?: string; site?: string; fuel?: string }>;
 }) {
   const sp = await searchParams;
   const supabase = await createClient();
@@ -44,18 +44,22 @@ export default async function DieselReportsPage({
   const start = isDate(sp.start) ? sp.start! : defaultStart;
   const end = isDate(sp.end) ? sp.end! : today;
   const siteFilter = sp.site || null;
+  // Diesel and petrol are separate stocks at separate rates, so the report
+  // shows one at a time rather than a meaningless combined total.
+  const fuel: "diesel" | "petrol" = sp.fuel === "petrol" ? "petrol" : "diesel";
+  const fuelLabel = fuel === "petrol" ? "Petrol" : "Diesel";
 
   let receiptsQuery = supabase
     .from("fuel_receipts")
     .select("project_id, liters, total_cost")
-    .eq("fuel_type", "diesel")
+    .eq("fuel_type", fuel)
     .gte("receipt_date", start)
     .lte("receipt_date", end);
   if (siteFilter) receiptsQuery = receiptsQuery.eq("project_id", siteFilter);
 
   const [{ data: projects }, rows, { data: receiptsRaw }] = await Promise.all([
     supabase.from("projects").select("id, name, code").eq("is_active", true).order("name"),
-    fetchMonthlyReport(supabase, start, end, siteFilter),
+    fetchMonthlyReport(supabase, start, end, siteFilter, fuel),
     receiptsQuery,
   ]);
 
@@ -84,12 +88,12 @@ export default async function DieselReportsPage({
   }
   const orderedGroups = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
-  const exportHref = `/diesel/reports/export?start=${start}&end=${end}${siteFilter ? `&site=${siteFilter}` : ""}`;
+  const exportHref = `/diesel/reports/export?start=${start}&end=${end}&fuel=${fuel}${siteFilter ? `&site=${siteFilter}` : ""}`;
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Diesel Report"
+        title={`${fuelLabel} Report`}
         subtitle="Per-site, per-machine consumption over a date range — for the monthly submission"
       />
 
@@ -111,6 +115,13 @@ export default async function DieselReportsPage({
             </option>
           ))}
         </Select>
+        <label className="flex flex-col gap-1 text-xs font-medium text-ink-2">
+          Fuel
+          <Select name="fuel" defaultValue={fuel} className="min-w-32">
+            <option value="diesel">Diesel</option>
+            <option value="petrol">Petrol</option>
+          </Select>
+        </label>
         <Button type="submit" variant="secondary" size="sm">
           Apply
         </Button>
@@ -129,8 +140,8 @@ export default async function DieselReportsPage({
           </p>
           {grandReceivedFuel > 0 && (
             <p className="mt-1 text-xs text-ink-3">
-              {grandReceivedFuel.toLocaleString("en-IN", { maximumFractionDigits: 0 })} L received
-              (barrels)
+              {grandReceivedFuel.toLocaleString("en-IN", { maximumFractionDigits: 0 })} L{" "}
+              {fuelLabel.toLowerCase()} received
             </p>
           )}
         </Card>
@@ -160,7 +171,9 @@ export default async function DieselReportsPage({
         </Card>
       </div>
 
-      {isLlmConfigured && rows.length > 0 && (
+      {/* The narrative is written from the diesel figures — it isn't offered
+          on the petrol view rather than silently summarising the wrong fuel. */}
+      {isLlmConfigured && rows.length > 0 && fuel === "diesel" && (
         <AiSummary start={start} end={end} site={siteFilter} />
       )}
 

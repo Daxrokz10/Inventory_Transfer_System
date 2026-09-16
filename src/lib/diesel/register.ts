@@ -74,13 +74,20 @@ export async function buildDieselRegister(
   supabase: SupabaseClient,
   projectId: string,
   range: DateRange,
+  /** Which stock this register is for. Diesel and petrol are separate
+      stocks — never mixed into one balance. */
+  fuel: "diesel" | "petrol" = "diesel",
 ): Promise<RegisterResult> {
-  // Opening anchor for this site (latest physical count).
-  const { data: opening } = await supabase
-    .from("diesel_opening_stock")
-    .select("liters, as_of")
-    .eq("project_id", projectId)
-    .maybeSingle();
+  // Opening anchor for this site (latest physical count). Only diesel has
+  // one — the petrol balance runs from its recorded receipts alone.
+  const { data: opening } =
+    fuel === "diesel"
+      ? await supabase
+          .from("diesel_opening_stock")
+          .select("liters, as_of")
+          .eq("project_id", projectId)
+          .maybeSingle()
+      : { data: null };
   const openingStock = opening ? Number(opening.liters) : 0;
   const openingAsOf = opening?.as_of ?? null;
 
@@ -93,7 +100,7 @@ export async function buildDieselRegister(
     .from("fuel_receipts")
     .select("receipt_date, liters, rate_per_liter, total_cost, vendor, note")
     .eq("project_id", projectId)
-    .eq("fuel_type", "diesel")
+    .eq("fuel_type", fuel)
     .lte("receipt_date", range.end);
 
   // OUTWARD — diesel issued to machines. Join the machine for
@@ -167,7 +174,7 @@ export async function buildDieselRegister(
   }));
 
   const logs = ((logsRaw ?? []) as unknown as LogRow[]).filter(
-    (l) => (l.machines?.fuel_type ?? "diesel") === "diesel",
+    (l) => (l.machines?.fuel_type ?? "diesel") === fuel,
   );
 
   // Codes for any sister site on the other side of a cross-site fill.

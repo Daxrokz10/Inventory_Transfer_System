@@ -26,17 +26,18 @@ export async function GET(req: NextRequest) {
   const start = searchParams.get("start") || monthStart;
   const end = searchParams.get("end") || today;
   const site = searchParams.get("site") || null;
+  const fuel = searchParams.get("fuel") === "petrol" ? "petrol" : "diesel";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
     return new Response("Invalid date range", { status: 400 });
   }
 
-  const rows = await fetchMonthlyReport(supabase, start, end, site);
+  const rows = await fetchMonthlyReport(supabase, start, end, site, fuel);
   const csv = toCsv(rows);
 
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="diesel-report-${start}_to_${end}.csv"`,
+      "Content-Disposition": `attachment; filename="${fuel}-report-${start}_to_${end}.csv"`,
     },
   });
 }

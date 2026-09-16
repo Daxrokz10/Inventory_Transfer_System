@@ -58,6 +58,9 @@ export async function fetchMonthlyReport(
   start: string,
   end: string,
   siteFilter: string | null,
+  /** One fuel at a time — diesel and petrol are separate stocks with
+      separate rates, and mixing them makes a site's totals meaningless. */
+  fuelType: "diesel" | "petrol" = "diesel",
 ): Promise<MonthlyReportRow[]> {
   // Supabase/PostgREST caps any query with no explicit range at 1000 rows —
   // silently, with no error. A full month across every site routinely
@@ -120,11 +123,10 @@ export async function fetchMonthlyReport(
   const rawByMachine = new Map<string, typeof logs>();
 
   for (const l of logs) {
-    // This is the DIESEL report — a petrol-fueled machine's fuel never
-    // touched the site's diesel barrel (same exclusion register.ts already
-    // applies to the Diesel Register), so it's skipped here too rather than
-    // inflating totals meant for the diesel monthly submission.
-    if (machineById.get(l.machine_id)?.fuel_type === "petrol") continue;
+    // One fuel per report: a petrol machine's fuel never touched the site's
+    // diesel barrel (the same exclusion register.ts applies), so it would
+    // otherwise inflate totals meant for the diesel monthly submission.
+    if ((machineById.get(l.machine_id)?.fuel_type ?? "diesel") !== fuelType) continue;
     if (!grouped.has(l.machine_id)) {
       const m = machineById.get(l.machine_id);
       const p = projectById.get(l.project_id);
