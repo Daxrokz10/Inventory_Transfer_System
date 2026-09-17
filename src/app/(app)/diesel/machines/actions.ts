@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/auth";
 
 // Register a machine at a site. Supervisors may only add machines at their
 // own site (enforced by RLS insert policy); admins can pick any site.
@@ -12,9 +13,7 @@ export async function addMachine(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const get = (k: string) => {
@@ -180,9 +179,7 @@ export async function updateMachine(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
   if (!(await isCallerAdmin(supabase, user.id))) return "Admin access required.";
 
@@ -263,9 +260,7 @@ export async function updateMachine(
 // intact.
 export async function deactivateMachine(formData: FormData): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
   if (!(await isCallerAdmin(supabase, user.id))) return;
 
@@ -281,9 +276,7 @@ export async function deactivateMachine(formData: FormData): Promise<void> {
 // Admin-only: bring a deactivated machine back.
 export async function reactivateMachine(formData: FormData): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
   if (!(await isCallerAdmin(supabase, user.id))) return;
 
@@ -301,9 +294,7 @@ export async function reactivateMachine(formData: FormData): Promise<void> {
 // internal machines whose history stays intact via deactivateMachine.
 export async function deleteMachine(formData: FormData): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
   if (!(await isCallerAdmin(supabase, user.id))) return;
 
@@ -327,9 +318,7 @@ export async function requestMachineChange(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const machine_id = String(formData.get("machine_id") ?? "");
@@ -377,9 +366,7 @@ export async function requestMachineChange(
 // history survives). Either way the request is closed.
 export async function resolveMachineRequest(formData: FormData): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
   if (!(await isCallerAdmin(supabase, user.id))) return;
 
@@ -438,9 +425,7 @@ export async function resolveMachineRequest(formData: FormData): Promise<void> {
 // enforces external-only + own-site, so this is safe even if called directly.
 export async function removeHiredMachine(formData: FormData): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const machine_id = String(formData.get("machine_id") ?? "");
@@ -458,9 +443,7 @@ export async function removeHiredMachine(formData: FormData): Promise<void> {
 // function, not just here, so this is defense in depth.
 export async function setMeterBroken(formData: FormData): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const machine_id = String(formData.get("machine_id") ?? "");
@@ -477,9 +460,7 @@ export async function setMeterBroken(formData: FormData): Promise<void> {
 // meaning — just a way for an admin to flag one to keep an eye on.
 export async function setSuspicious(formData: FormData): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
   if (!(await isCallerAdmin(supabase, user.id))) return;
 
@@ -498,9 +479,7 @@ export async function setSuspicious(formData: FormData): Promise<void> {
 // re-registering it (which would lose everything).
 export async function transferMachine(formData: FormData): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
   if (!(await isCallerAdmin(supabase, user.id))) return;
 

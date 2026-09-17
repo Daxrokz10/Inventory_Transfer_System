@@ -2,13 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import { selectAll } from "@/lib/supabase/selectAll";
 import { NewItemButton } from "./ItemForm";
 import { ItemsTable } from "./ItemsTable";
+import { getProfile } from "@/lib/auth";
 
 export default async function ItemsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from("profiles").select("role").eq("id", user.id).single()
-    : { data: null };
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
 
   const [{ data: items }, balances, { data: projects }] = await Promise.all([

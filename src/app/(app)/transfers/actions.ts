@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/auth";
 
 type LineInput = { item_id: string; qty_sent: number; rate: number };
 
@@ -14,9 +15,7 @@ export async function createTransfer(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const get = (k: string) => {
@@ -92,9 +91,7 @@ export async function receiveTransfer(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const transferId = String(formData.get("transfer_id") ?? "");
@@ -158,9 +155,7 @@ export async function deleteTransfer(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const { data: profile } = await supabase

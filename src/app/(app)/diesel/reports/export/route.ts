@@ -1,22 +1,21 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchMonthlyReport, toCsv } from "@/lib/diesel/monthlyReport";
+import { getAuthUser, getProfile, getAccess } from "@/lib/auth";
 
 // Admin-only CSV download of the monthly per-site, per-machine diesel
 // consumption report — same data as the /diesel/reports page, exported
 // for the monthly submission.
 export async function GET(req: NextRequest) {
+  if (!(await getAccess()).diesel) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) return new Response("Unauthorized", { status: 401 });
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   if (!isAdmin) return new Response("Forbidden", { status: 403 });
 

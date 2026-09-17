@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRequire } from "module";
 import { createClient } from "@/lib/supabase/server";
 import { selectAll } from "@/lib/supabase/selectAll";
+import { getProfile, getAccess } from "@/lib/auth";
 
 const require = createRequire(import.meta.url);
 const XLSX = require("xlsx");
@@ -10,15 +11,16 @@ const XLSX = require("xlsx");
 // downloaded sheet matches exactly what's on screen, including the same
 // role-based site scoping and group/search filters.
 export async function GET(req: NextRequest) {
+  if (!(await getAccess()).inventory) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
   const sp = req.nextUrl.searchParams;
   const group = sp.get("group") ?? "";
   const q = (sp.get("q") ?? "").trim().toLowerCase();
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from("profiles").select("role, home_project_id").eq("id", user.id).single()
-    : { data: null };
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;
 

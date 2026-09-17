@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ReceiveForm } from "./ReceiveForm";
 import { DeleteTransferForm } from "./DeleteTransferForm";
+import { getProfile } from "@/lib/auth";
 
 const statusStyles: Record<string, string> = {
   draft: "bg-surface-2 text-ink-2",
@@ -29,10 +30,7 @@ export default async function TransferDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from("profiles").select("role, home_project_id").eq("id", user.id).single()
-    : { data: null };
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
 
   const { data: t } = await supabase

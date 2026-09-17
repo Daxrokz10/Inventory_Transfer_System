@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { CreateUserForm, AssignSiteForm, ChangePasswordForm, ChangeEmailForm, RemoveUserForm } from "./UserForms";
+import { CreateUserForm, AssignSiteForm, ChangePasswordForm, ChangeEmailForm, ChangeRoleForm, RemoveUserForm } from "./UserForms";
+import { getAuthUser, getProfile } from "@/lib/auth";
 
 function RoleBadge({ role }: { role: string }) {
   const styles: Record<string, string> = {
@@ -23,14 +24,10 @@ function RoleBadge({ role }: { role: string }) {
 
 export default async function UsersPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
-  const { data: me } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const me = await getProfile();
 
   const callerRole = me?.role ?? null;
   if (callerRole !== "admin" && callerRole !== "superadmin") redirect("/dashboard");
@@ -99,7 +96,10 @@ export default async function UsersPage() {
                       {emailById.get(p.id) || <span className="text-ink-3">—</span>}
                     </td>
                     <td className="py-2.5 pr-4">
-                      <RoleBadge role={p.role} />
+                      {canManage && p.role !== "superadmin" ? (
+                        <ChangeRoleForm userId={p.id} currentRole={p.role} isSuperadmin={isSuperadmin} />
+                      ) : null}
+                      {!(canManage && (p.role !== "admin" || isSuperadmin)) && <RoleBadge role={p.role} />}
                     </td>
                     <td className="py-2.5 pr-4 text-ink-2">
                       {p.project
@@ -137,7 +137,7 @@ export default async function UsersPage() {
         <h2 className="mb-1 text-base font-semibold">Create new account</h2>
         <p className="mb-4 text-xs text-ink-2">
           The account is active immediately — the user can log in with these credentials right away.
-          {isSuperadmin && " As superadmin you can create both admin and store manager accounts."}
+          {isSuperadmin && " As superadmin you can also create admin accounts. Module access is managed in the Control Panel."}
         </p>
         <CreateUserForm projects={allProjects} isSuperadmin={isSuperadmin} />
       </section>

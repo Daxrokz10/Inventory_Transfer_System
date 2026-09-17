@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { createUser, assignSite, changePassword, changeEmail, deleteUser } from "./actions";
+import { createUser, assignSite, changePassword, changeEmail, changeRole, deleteUser } from "./actions";
 
 type Project = { id: string; code: string; name: string };
 
@@ -107,6 +107,37 @@ export function AssignSiteForm({
       >
         {pending ? "Saving…" : "Save"}
       </button>
+      {error && <span className="text-xs text-danger">{error}</span>}
+    </form>
+  );
+}
+
+export function ChangeRoleForm({
+  userId,
+  currentRole,
+  isSuperadmin,
+}: {
+  userId: string;
+  currentRole: string;
+  isSuperadmin: boolean;
+}) {
+  const [error, action, pending] = useActionState(changeRole, null);
+  // Admin accounts can only be changed by the superadmin.
+  if (currentRole === "admin" && !isSuperadmin) return null;
+
+  return (
+    <form action={action} className="flex items-center gap-2">
+      <input type="hidden" name="user_id" value={userId} />
+      <select
+        name="role"
+        defaultValue={currentRole}
+        onChange={(e) => e.currentTarget.form?.requestSubmit()}
+        disabled={pending}
+        className="rounded-lg border border-line-strong px-2 py-1.5 text-xs focus:outline-none"
+      >
+        <option value="supervisor">Store Manager</option>
+        {isSuperadmin && <option value="admin">Admin</option>}
+      </select>
       {error && <span className="text-xs text-danger">{error}</span>}
     </form>
   );

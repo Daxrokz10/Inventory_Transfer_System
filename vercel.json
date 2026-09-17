@@ -3,6 +3,10 @@
     {
       "path": "/api/diesel/monitor",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/hr/sync",
+      "schedule": "30 2 * * *"
     }
   ]
 }

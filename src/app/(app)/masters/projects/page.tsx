@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { selectAll } from "@/lib/supabase/selectAll";
 import { canEditClosingBalance } from "./constants";
 import { EditableQtyCell } from "./EditableQtyCell";
+import { getAuthUser, getProfile } from "@/lib/auth";
 
 const qty = (n: number) =>
   n === 0 ? "" : new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
@@ -16,10 +17,8 @@ export default async function ClosingBalancePage({
   const sp = await searchParams;
   const supabase = await createClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from("profiles").select("role, home_project_id").eq("id", user!.id).single()
-    : { data: null };
+  const user = await getAuthUser();
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;
   // In-place quantity editing is limited to two specific accounts.

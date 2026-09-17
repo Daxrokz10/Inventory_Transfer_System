@@ -36,10 +36,13 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  let user = null;
+  // getClaims refreshes an expired session (writing the new cookies) and then
+  // verifies the JWT locally against the project's ES256 public key, so the
+  // common case costs no round trip to the Auth server, unlike getUser.
+  let user: { id: string } | null = null;
   try {
-    const { data } = await supabase.auth.getUser();
-    user = data.user;
+    const { data } = await supabase.auth.getClaims();
+    user = data?.claims?.sub ? { id: data.claims.sub } : null;
   } catch {
     // A stale/invalid refresh token (leftover from a previous session, a
     // rotated Supabase project, or a cleared user) makes supabase-js THROW
@@ -56,22 +59,24 @@ export async function updateSession(request: NextRequest) {
     }
   }
 
-  const publicPaths = ["/login", "/auth"];
+  const publicPaths = ["/login", "/auth", "/no-access"];
   // Routes that authenticate themselves and legitimately arrive without a
   // session cookie. /api/diesel/monitor is called by the platform's cron, not
   // a browser — it checks a bearer secret of its own and 401s without it, so
   // skipping the session gate here opens nothing up. Session-gating it would
   // simply redirect every nightly run to the login page.
-  const selfAuthedPaths = ["/api/diesel/monitor"];
+  const selfAuthedPaths = ["/api/diesel/monitor", "/api/hr/sync"];
+  const path = request.nextUrl.pathname;
   const isPublic =
-    publicPaths.some((p) => request.nextUrl.pathname.startsWith(p)) ||
-    selfAuthedPaths.some((p) => request.nextUrl.pathname === p);
+    publicPaths.some((p) => path.startsWith(p)) ||
+    selfAuthedPaths.some((p) => path === p);
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
+
 
   return response;
 }

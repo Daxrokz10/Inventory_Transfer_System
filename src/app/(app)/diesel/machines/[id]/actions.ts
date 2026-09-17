@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAuthUser } from "@/lib/auth";
 
 // Gated to one specific account, not a role — even another superadmin
 // can't use this. There is no visible control anywhere for it; the caller
@@ -21,10 +21,7 @@ export interface LogEditInput {
 }
 
 export async function editDailyLog(input: LogEditInput): Promise<string | null> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user || user.id !== SOLE_EDITOR_ID) return GENERIC_ERROR;
 
   const admin = createAdminClient();

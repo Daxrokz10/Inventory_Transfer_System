@@ -7,6 +7,7 @@ import { Input, Select } from "@/components/ui/Field";
 import { Badge } from "@/components/ui/Badge";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { fetchSiteHistory, type SiteStay } from "@/lib/diesel/history";
+import { getAuthUser, getProfile } from "@/lib/auth";
 
 const SOURCE_LABEL: Record<SiteStay["source"], string> = {
   logged: "from fuel logs",
@@ -34,11 +35,9 @@ export default async function SiteHistoryPage({
   const sp = await searchParams;
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   if (!isAdmin) redirect("/diesel");
 

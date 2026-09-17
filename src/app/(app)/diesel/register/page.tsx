@@ -9,6 +9,7 @@ import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { buildDieselRegister } from "@/lib/diesel/register";
 import { monthRange } from "@/lib/diesel/monthlyReport";
 import { OpeningStockForm } from "./OpeningStockForm";
+import { getProfile } from "@/lib/auth";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
@@ -22,12 +23,7 @@ export default async function DieselRegisterPage({
   const sp = await searchParams;
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from("profiles").select("role, home_project_id").eq("id", user.id).single()
-    : { data: null };
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;
 

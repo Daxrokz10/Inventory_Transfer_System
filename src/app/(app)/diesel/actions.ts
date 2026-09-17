@@ -8,6 +8,7 @@ import { computeAnomaliesForLog } from "@/lib/diesel/anomaly";
 import { getPricesForCity } from "@/lib/diesel/fuelPrice";
 import { cityForState } from "@/lib/diesel/types";
 import type { DailyLog, Machine } from "@/lib/diesel/types";
+import { getAuthUser } from "@/lib/auth";
 
 interface SheetRow {
   machine_id: string;
@@ -38,9 +39,7 @@ export async function saveDailySheet(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const log_date = String(formData.get("log_date") ?? "");
@@ -260,9 +259,7 @@ export async function addFuelReceipt(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const project_id = String(formData.get("project_id") ?? "").trim();
@@ -321,9 +318,7 @@ export async function addFuelReceipt(
 // Remove a diesel-received entry (own site or admin, per RLS).
 export async function deleteFuelReceipt(formData: FormData): Promise<void> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const id = String(formData.get("receipt_id") ?? "").trim();

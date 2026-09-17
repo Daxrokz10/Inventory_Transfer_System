@@ -10,6 +10,7 @@ import { computeFillMetrics } from "@/lib/diesel/efficiency";
 import { EfficiencyChart, type EfficiencyPoint } from "../../EfficiencyChart";
 import { LogHistoryRow } from "./LogHistoryRow";
 import { SuspiciousControl } from "../MachineActions";
+import { getAuthUser, getProfile } from "@/lib/auth";
 
 const SOLE_EDITOR_ID = "86091b08-3c52-4650-a55f-de1890e36415";
 
@@ -27,12 +28,8 @@ export default async function MachineDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from("profiles").select("role").eq("id", user.id).single()
-    : { data: null };
+  const user = await getAuthUser();
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const canEdit = user?.id === SOLE_EDITOR_ID;
 

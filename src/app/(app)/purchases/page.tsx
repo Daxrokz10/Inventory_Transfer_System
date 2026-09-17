@@ -2,17 +2,14 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { PurchaseForm } from "./PurchaseForm";
 import { PURCHASE_CODE } from "./constants";
+import { getAuthUser, getProfile } from "@/lib/auth";
 
 export default async function PurchasesPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role, home_project_id")
-    .eq("id", user.id)
-    .single();
+  const profile = await getProfile();
   const role = profile?.role ?? null;
   if (role !== "admin" && role !== "superadmin") redirect("/dashboard");
 

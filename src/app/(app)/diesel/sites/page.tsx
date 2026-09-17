@@ -9,17 +9,14 @@ import {
 } from "./actions";
 import { GroupForm } from "./GroupForm";
 import { SiteGroupSelect } from "./SiteGroupSelect";
+import { getAuthUser, getProfile } from "@/lib/auth";
 
 export default async function SitesPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
-  const { data: me } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const me = await getProfile();
   const role = me?.role ?? null;
   if (role !== "admin" && role !== "superadmin") redirect("/dashboard");
 

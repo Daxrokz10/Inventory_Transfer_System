@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { canEditClosingBalance } from "./constants";
+import { getAuthUser } from "@/lib/auth";
 
 // Set the on-hand quantity of one item at one site.
 //
@@ -15,9 +16,7 @@ export async function adjustStockQty(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   // Authorisation is by explicit account, not by role.

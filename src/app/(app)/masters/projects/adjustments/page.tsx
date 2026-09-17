@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getAuthUser, getProfile } from "@/lib/auth";
 
 const LIMIT = 500;
 
@@ -21,16 +22,10 @@ const num = (n: number | null) =>
 
 export default async function AdjustmentsPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
-  const { data: me } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const me = await getProfile();
   const isAdmin = me?.role === "admin" || me?.role === "superadmin";
   if (!isAdmin) redirect("/masters/projects");
 

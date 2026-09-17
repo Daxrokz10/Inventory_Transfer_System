@@ -11,6 +11,7 @@ import { MachineActions, MeterBrokenControl } from "./MachineActions";
 import { MachineRequestButtons } from "./MachineRequestButtons";
 import { RemoveHiredMachineButton } from "./RemoveHiredMachineButton";
 import { MachinesToolbar } from "./MachinesToolbar";
+import { getProfile } from "@/lib/auth";
 
 type GroupBy = "site" | "type";
 
@@ -25,16 +26,7 @@ export default async function MachinesPage({
 
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase
-        .from("profiles")
-        .select("role, home_project_id")
-        .eq("id", user.id)
-        .single()
-    : { data: null };
+  const profile = await getProfile();
 
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;

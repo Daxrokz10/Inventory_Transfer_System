@@ -82,6 +82,12 @@
   --color-accent-soft: #fbefdd;
 }
 
+[data-theme="hr"] {
+  --color-accent: #0f7a6c;
+  --color-accent-strong: #0b5f54;
+  --color-accent-soft: #dcf1ee;
+}
+
 /* ===================== INSTRUMENT (dark) =====================
    Dark token overrides, applied under both the OS query and the explicit
    toggle (literal blocks, so it stays portable plain CSS). */
@@ -125,6 +131,11 @@
     --color-accent-strong: #f2a548;
     --color-accent-soft: rgba(232, 145, 42, 0.16);
   }
+  :root:not([data-mode="light"]) [data-theme="hr"] {
+    --color-accent: #2bb3a1;
+    --color-accent-strong: #4cc9b8;
+    --color-accent-soft: rgba(43, 179, 161, 0.16);
+  }
 }
 
 /* Explicit dark toggle — must win over the OS query above. */
@@ -166,6 +177,12 @@
   --color-accent: #e8912a;
   --color-accent-strong: #f2a548;
   --color-accent-soft: rgba(232, 145, 42, 0.16);
+}
+
+[data-mode="dark"] [data-theme="hr"] {
+  --color-accent: #2bb3a1;
+  --color-accent-strong: #4cc9b8;
+  --color-accent-soft: rgba(43, 179, 161, 0.16);
 }
 
 /* ---- base ---- */

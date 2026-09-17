@@ -1,7 +1,12 @@
+import { getAccess } from "@/lib/auth";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(req: NextRequest) {
+  if (!(await getAccess()).inventory) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
   const projectId = req.nextUrl.searchParams.get("project_id");
   if (!projectId) {
     return NextResponse.json({ error: "project_id required" }, { status: 400 });

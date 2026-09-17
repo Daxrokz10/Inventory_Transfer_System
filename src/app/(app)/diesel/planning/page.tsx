@@ -15,6 +15,7 @@ import {
 } from "@/lib/diesel/planning";
 import { RequirementForm } from "./RequirementForm";
 import { RequirementResolveControls } from "./RequirementResolveControls";
+import { getAuthUser, getProfile } from "@/lib/auth";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -32,16 +33,10 @@ const fmtDate = (d: string) =>
 
 export default async function PlanningPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   if (!isAdmin) redirect("/diesel");
 

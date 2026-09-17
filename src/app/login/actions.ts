@@ -16,5 +16,6 @@ export async function login(_prev: string | null, formData: FormData) {
   }
 
   revalidatePath("/", "layout");
-  redirect("/dashboard");
+  // "/" routes each user to their first allowed module (or the Control Panel).
+  redirect("/");
 }

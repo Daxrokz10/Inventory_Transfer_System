@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { isLlmConfigured } from "@/lib/llm/client";
 import { AssistantChat } from "./AssistantChat";
+import { getProfile } from "@/lib/auth";
 
 /* Admin-only natural-language view over the diesel data.
 
@@ -17,12 +18,7 @@ import { AssistantChat } from "./AssistantChat";
 export const maxDuration = 60;
 export default async function DieselAssistantPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from("profiles").select("role").eq("id", user.id).single()
-    : { data: null };
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   if (!isAdmin) redirect("/diesel");
 

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { resolveFlag } from "../actions";
 import { acknowledgeInsight } from "./actions";
+import { getProfile } from "@/lib/auth";
 
 const SEVERITY_TONE: Record<string, BadgeTone> = {
   low: "neutral",
@@ -21,12 +22,7 @@ const SEVERITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 export default async function AnomaliesPage() {
   const supabase = await createClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from("profiles").select("role").eq("id", user.id).single()
-    : { data: null };
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   if (!isAdmin) redirect("/diesel");
 

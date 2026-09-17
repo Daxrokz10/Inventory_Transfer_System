@@ -3,58 +3,86 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
+import type { Access } from "@/lib/auth";
 import {
   MODULES,
+  hrHome,
   moduleFromPathname,
+  modulesFor,
   navFor,
-  type ModuleKey,
 } from "@/lib/nav";
+import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
 
-/* One shell, two tools. The module switcher at the top of the sidebar flips
-   between Inventory (steel blue) and Diesel (safety amber); data-theme on the
+/* One shell, three tools. The module switcher at the top of the sidebar flips
+   between Inventory (steel blue), Diesel (safety amber) and HR (teal); data-theme on the
    root swaps the accent tokens so each module keeps its own identity while
    sharing the session, sidebar, and design system. */
 
 export function AppShell({
   fullName,
   roleLabel,
-  isAdmin,
+  role,
+  access,
   children,
 }: {
   fullName: string;
   roleLabel: string;
-  isAdmin: boolean;
+  role: string | null;
+  access: Access;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const module = moduleFromPathname(pathname);
-  const nav = navFor(module, isAdmin);
+  const current = moduleFromPathname(pathname);
+  const nav = navFor(current, access, role);
+  const modules = modulesFor(access);
+  const moduleHome = (key: (typeof modules)[number]) => (key === "hr" ? hrHome(access) : MODULES[key].home);
 
   return (
     <div
-      data-theme={module === "diesel" ? "diesel" : undefined}
+      data-theme={current === "diesel" || current === "hr" ? current : undefined}
       className="flex min-h-screen"
     >
       <aside className="sticky top-0 flex h-screen w-64 flex-col bg-sidebar px-3 py-4 text-sidebar-ink">
         {/* Brand */}
-        <div className="mb-4 px-2">
-          <p className="font-display text-base font-bold uppercase tracking-[0.16em]">
-            SGC <span className="text-sidebar-muted">Suite</span>
-          </p>
-          <p className="mt-0.5 text-[11px] text-sidebar-muted">
-            Shree Ganesh Corporation
-          </p>
+        <div className="mb-4 flex items-start justify-between gap-2 px-2">
+          <div>
+            <p className="font-display text-base font-bold uppercase tracking-[0.16em]">
+              SGC <span className="text-sidebar-muted">Suite</span>
+            </p>
+            <p className="mt-0.5 text-[11px] text-sidebar-muted">
+              Shree Ganesh Corporation
+            </p>
+          </div>
+          <NotificationBell />
         </div>
 
+        {access.superadmin && (
+          <Link
+            href="/console"
+            className={cn(
+              "mb-2 block rounded-md px-3 py-1.5 text-xs font-semibold transition-colors",
+              current === "console"
+                ? "bg-white/10 text-white"
+                : "text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-ink",
+            )}
+          >
+            ⚙ Control Panel
+          </Link>
+        )}
+
         {/* Module switcher */}
-        <div className="mb-5 grid grid-cols-2 gap-1 rounded-lg bg-sidebar-hover p-1">
-          {(Object.keys(MODULES) as ModuleKey[]).map((key) => {
-            const active = key === module;
+        {modules.length > 0 && (
+        <div
+          className="mb-5 grid gap-1 rounded-lg bg-sidebar-hover p-1"
+          style={{ gridTemplateColumns: `repeat(${modules.length}, minmax(0, 1fr))` }}
+        >
+          {modules.map((key) => {
+            const active = key === current;
             return (
               <Link
                 key={key}
-                href={MODULES[key].home}
+                href={moduleHome(key)}
                 className={cn(
                   "rounded-md px-2 py-1.5 text-center text-xs font-semibold transition-colors",
                   active
@@ -67,11 +95,12 @@ export function AppShell({
             );
           })}
         </div>
+        )}
 
         {/* Module title */}
         <div className="mb-2 px-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-sidebar-muted">
-            {MODULES[module].tagline}
+            {MODULES[current].tagline}
           </p>
         </div>
 
@@ -83,7 +112,7 @@ export function AppShell({
             // light up "Fuel Log").
             const active =
               pathname === item.href ||
-              (item.href !== MODULES[module].home &&
+              (item.href !== MODULES[current].home &&
                 pathname.startsWith(item.href + "/"));
             return (
               <Link

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getProfile } from "@/lib/auth";
 
 // A "transaction" here is a stock transfer between sites. It is Open while the
 // material is in transit (dispatched) and Closed once the receiving site
@@ -38,10 +39,7 @@ export default async function TransactionsPage({
   const supabase = await createClient();
 
   // Scope: store managers only see transfers involving their own site.
-  const { data: { user } } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase.from("profiles").select("role, home_project_id").eq("id", user.id).single()
-    : { data: null };
+  const profile = await getProfile();
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;
 

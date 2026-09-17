@@ -1,11 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { NewTransferForm } from "./NewTransferForm";
+import { getAuthUser } from "@/lib/auth";
 
 export default async function NewTransferPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
 
   const [{ data: projects }, { data: items }, { data: profile }] =
     await Promise.all([

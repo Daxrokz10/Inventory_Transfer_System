@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getAuthUser } from "@/lib/auth";
 
 // Set (or re-set) the opening barrel-stock count that anchors a site's
 // diesel register balance. RLS scopes this to the caller's own site (or
@@ -12,9 +13,7 @@ export async function setOpeningStock(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const project_id = String(formData.get("project_id") ?? "").trim();

@@ -5,7 +5,9 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-type CallerRole = "superadmin" | "admin" | "supervisor" | null;
+type CallerRole = "superadmin" | "admin" | "supervisor" | "hr" | null;
+type AssignableRole = "admin" | "supervisor";
+const ASSIGNABLE_ROLES: AssignableRole[] = ["admin", "supervisor"];
 
 async function getCallerRole(): Promise<{
   supabase: Awaited<ReturnType<typeof createClient>>;
@@ -48,7 +50,7 @@ export async function createUser(
   if (requestedRole === "admin" && callerRole !== "superadmin") {
     return "Only superadmin can create admin accounts.";
   }
-  if (requestedRole === "superadmin") {
+  if (!ASSIGNABLE_ROLES.includes(requestedRole as AssignableRole)) {
     return "Superadmin accounts cannot be created from here.";
   }
 
@@ -62,7 +64,7 @@ export async function createUser(
 
   const { error: pErr } = await supabase
     .from("profiles")
-    .update({ full_name, home_project_id, role: requestedRole as "admin" | "supervisor" })
+    .update({ full_name, home_project_id, role: requestedRole as AssignableRole })
     .eq("id", data.user.id);
   if (pErr) return pErr.message;
 
@@ -169,6 +171,34 @@ export async function deleteUser(
 
   const admin = createAdminClient();
   const { error } = await admin.auth.admin.deleteUser(user_id);
+  if (error) return error.message;
+
+  revalidatePath("/admin/users");
+  return null;
+}
+
+export async function changeRole(
+  _prev: string | null,
+  formData: FormData,
+): Promise<string | null> {
+  const { supabase, callerRole, callerId } = await getCallerRole();
+
+  const user_id = String(formData.get("user_id") ?? "").trim();
+  const role = String(formData.get("role") ?? "").trim() as AssignableRole;
+  if (!user_id) return "Missing user reference.";
+  if (user_id === callerId) return "You cannot change your own role.";
+  if (!ASSIGNABLE_ROLES.includes(role)) return "Invalid role.";
+
+  const guard = await assertTargetManageable(supabase, user_id);
+  if (guard) return guard;
+
+  // Promoting to, or demoting from, admin is a superadmin decision.
+  const { data: target } = await supabase.from("profiles").select("role").eq("id", user_id).single();
+  if ((role === "admin" || target?.role === "admin") && callerRole !== "superadmin") {
+    return "Only superadmin can grant or remove admin access.";
+  }
+
+  const { error } = await supabase.from("profiles").update({ role }).eq("id", user_id);
   if (error) return error.message;
 
   revalidatePath("/admin/users");

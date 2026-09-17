@@ -16,6 +16,7 @@ import { MachineRequestButtons } from "./machines/MachineRequestButtons";
 import { RequestResolveControls } from "./machines/RequestResolveControls";
 import { EfficiencyChart, type EfficiencyPoint } from "./EfficiencyChart";
 import { resolveFlag, deleteFuelReceipt } from "./actions";
+import { getProfile } from "@/lib/auth";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -285,16 +286,7 @@ export default async function DieselPage({
   const date = today;
 
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const { data: profile } = user
-    ? await supabase
-        .from("profiles")
-        .select("role, home_project_id")
-        .eq("id", user.id)
-        .single()
-    : { data: null };
+  const profile = await getProfile();
 
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const homeProjectId = profile?.home_project_id ?? null;

@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { isSupabaseConfigured } from "@/lib/env";
 import { SetupNotice } from "@/components/SetupNotice";
 import { AppShell } from "@/components/AppShell";
-import { createClient } from "@/lib/supabase/server";
+import { accessFromProfile, getAuthUser, getProfile } from "@/lib/auth";
 
 export default async function AppLayout({
   children,
@@ -13,36 +13,36 @@ export default async function AppLayout({
     return <SetupNotice />;
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
 
   if (!user) {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, role")
-    .eq("id", user.id)
-    .single();
+  const profile = await getProfile();
+  const access = accessFromProfile(profile);
 
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
   const roleLabel =
     profile?.role === "superadmin"
       ? "Superadmin"
       : profile?.role === "admin"
         ? "Admin"
-        : profile?.role === "supervisor"
+        : profile?.can_inventory || profile?.can_diesel
           ? "Store Manager"
-          : "—";
+          : profile?.hr_staff
+            ? "HR"
+            : profile?.hr_planning
+              ? "Planning"
+              : profile?.hr_interviewer
+                ? "Interviewer"
+                : "—";
 
   return (
     <AppShell
       fullName={profile?.full_name ?? user.email ?? "—"}
       roleLabel={roleLabel}
-      isAdmin={isAdmin}
+      role={profile?.role ?? null}
+      access={access}
     >
       {children}
     </AppShell>

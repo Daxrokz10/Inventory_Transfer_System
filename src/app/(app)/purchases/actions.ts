@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PURCHASE_CODE } from "./constants";
+import { getAuthUser } from "@/lib/auth";
 
 // The purchase source is a reserved pseudo-site (code J-0000). A purchase is
 // recorded as a transfer FROM J-0000 INTO the destination site, immediately
@@ -32,7 +33,7 @@ export async function createPurchase(
   formData: FormData,
 ): Promise<string | null> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const { data: profile } = await supabase

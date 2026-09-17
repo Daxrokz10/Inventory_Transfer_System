@@ -7,6 +7,7 @@ import {
   gatherDieselSnapshot,
   DIESEL_SYSTEM_PROMPT,
 } from "@/lib/diesel/llmContext";
+import { getAuthUser } from "@/lib/auth";
 
 /* Written summary of the diesel report for a date range, produced by the
    locally-hosted model from the same figures the table below it shows.
@@ -35,9 +36,7 @@ export async function generateNarrative(
   formData: FormData,
 ): Promise<NarrativeState> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   // Re-checked here, not inherited from the page — a server action is its

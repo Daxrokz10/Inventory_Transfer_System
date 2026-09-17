@@ -5,10 +5,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getPricesForCity } from "@/lib/diesel/fuelPrice";
 import { cityForState } from "@/lib/diesel/types";
+import { getAuthUser } from "@/lib/auth";
 
 async function requireAdmin() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
   const { data: profile } = await supabase
     .from("profiles")

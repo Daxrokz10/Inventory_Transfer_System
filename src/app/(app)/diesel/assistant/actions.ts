@@ -7,6 +7,7 @@ import {
   gatherDieselSnapshot,
   DIESEL_SYSTEM_PROMPT,
 } from "@/lib/diesel/llmContext";
+import { getAuthUser } from "@/lib/auth";
 
 /* The ask-your-data assistant.
 
@@ -42,9 +43,7 @@ export async function askDieselAssistant(
   formData: FormData,
 ): Promise<AssistantState> {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
   if (!user) redirect("/login");
 
   const { data: profile } = await supabase
