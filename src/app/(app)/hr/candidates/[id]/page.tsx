@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardLabel } from "@/components/ui/Card";
 import { getHrContext } from "@/lib/hr/auth";
 import { getOpenOpenings, getStages } from "@/lib/hr/data";
 import { RECOMMENDATION_LABEL, fmtDateTime, recommendationTone, statusTone } from "@/lib/hr/format";
 import { listPeople } from "@/lib/hr/people";
-import { resumeEmbedUrl } from "@/lib/hr/resume";
 import { FIELD_LABELS } from "@/lib/hr/sheet";
 import {
   AddPanelInterviewerForm,
@@ -19,6 +19,7 @@ import {
   ResumeLinkForm,
   StatusForm,
 } from "../../HrForms";
+import { ResumeFrame, ResumeSkeleton } from "../../ResumePanel";
 import { Timeline, buildTimeline } from "../../Timeline";
 
 type Interview = {
@@ -52,7 +53,7 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
     .maybeSingle();
   if (!c) notFound();
 
-  const [{ data: ivs }, { data: history }, people, embed, stages, openings] = await Promise.all([
+  const [{ data: ivs }, { data: history }, people, stages, openings] = await Promise.all([
     supabase
       .from("hr_interviews")
       .select("id, panel_id, interviewer_id, round, scheduled_at, mode, hr_note, state, feedback, rating, recommendation, completed_at, created_at")
@@ -65,7 +66,6 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
       .order("changed_at", { ascending: false })
       .limit(30),
     listPeople(),
-    resumeEmbedUrl(c.resume_url),
     isHr ? getStages() : Promise.resolve([]),
     isHr ? getOpenOpenings() : Promise.resolve([]),
   ]);
@@ -344,18 +344,9 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
               {isHr && c.resume_url && <ResumeLinkForm id={c.id} url={c.resume_url} />}
             </div>
           </div>
-          {embed.note && <p className="rounded-md bg-warn-soft px-3 py-2 text-xs text-warn">{embed.note}</p>}
-          {embed.src ? (
-            <iframe
-              src={embed.src}
-              title={`Resume — ${c.name}`}
-              className="h-[80vh] w-full rounded-md border border-line bg-white"
-            />
-          ) : (
-            <div className="rounded-md border border-dashed border-line-strong p-6 text-sm text-ink-2">
-              {c.resume_url ? (embed.error ?? "This link can't be previewed here. Use “Open in OneDrive”.") : "No resume link yet."}
-            </div>
-          )}
+          <Suspense fallback={<ResumeSkeleton className="h-[80vh]" />}>
+            <ResumeFrame url={c.resume_url} name={c.name} className="h-[80vh]" />
+          </Suspense>
           {isHr && !c.resume_url && <ResumeLinkForm id={c.id} url={null} />}
         </Card>
       </div>

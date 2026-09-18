@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Suspense } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardLabel } from "@/components/ui/Card";
 import { getHrContext } from "@/lib/hr/auth";
 import { parseScores } from "@/lib/hr/evaluation";
 import { fmtDateTime } from "@/lib/hr/format";
 import { listPeople } from "@/lib/hr/people";
-import { resumeEmbedUrl } from "@/lib/hr/resume";
+import { ResumeFrame, ResumeSkeleton } from "../../ResumePanel";
 import { EvaluationForm } from "./EvaluationForm";
 
 /* The interview room: the evaluation form on the left, the candidate's resume
@@ -35,7 +36,6 @@ export default async function EvaluatePage({ params }: { params: Promise<{ id: s
     listPeople(),
   ]);
   if (!c) notFound();
-  const embed = await resumeEmbedUrl(c.resume_url);
   const interviewer = people.find((p) => p.id === iv.interviewer_id)?.name ?? "Unknown";
   const readOnly = !mine || iv.state === "completed" || iv.state === "cancelled";
 
@@ -131,14 +131,9 @@ export default async function EvaluatePage({ params }: { params: Promise<{ id: s
               </a>
             )}
           </div>
-          {embed.note && <p className="rounded-md bg-warn-soft px-3 py-2 text-xs text-warn">{embed.note}</p>}
-          {embed.src ? (
-            <iframe src={embed.src} title={`Resume — ${c.name}`} className="h-full min-h-[60vh] w-full rounded-md border border-line bg-white" />
-          ) : (
-            <div className="rounded-md border border-dashed border-line-strong p-6 text-sm text-ink-2">
-              {c.resume_url ? (embed.error ?? "This link can't be previewed here.") : "No resume link."}
-            </div>
-          )}
+          <Suspense fallback={<ResumeSkeleton className="h-full" />}>
+            <ResumeFrame url={c.resume_url} name={c.name} className="h-full min-h-[60vh]" />
+          </Suspense>
         </Card>
       </div>
     </div>

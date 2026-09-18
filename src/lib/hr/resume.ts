@@ -5,10 +5,30 @@ import { getConnection, isExcelReady } from "./sync";
     OneDrive / SharePoint links go through Graph's preview action (the plain
     share link refuses to be framed); Google Drive and direct PDFs are
     rewritten or used as-is. Returns null when no embed is possible. */
-export async function resumeEmbedUrl(
-  url: string | null,
-): Promise<{ src: string | null; error?: string; note?: string }> {
+export type ResumeEmbed = { src: string | null; error?: string; note?: string };
+
+/* Asking Graph for a preview link costs a round trip to Microsoft (two when
+   the ?e=… token has to be dropped), which is the slow part of opening a
+   candidate. The links Graph hands back stay valid for a while, so keep them
+   for a few minutes: opening the same resume again, or a second person opening
+   it, is then instant. */
+const CACHE_MS = 5 * 60_000;
+const cache = new Map<string, { at: number; value: ResumeEmbed }>();
+
+export async function resumeEmbedUrl(url: string | null): Promise<ResumeEmbed> {
   if (!url) return { src: null };
+  const hit = cache.get(url);
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
+  const value = await resolveEmbed(url);
+  // Errors aren't cached: a permission fix should show up straight away.
+  if (value.src) {
+    if (cache.size > 500) cache.clear();
+    cache.set(url, { at: Date.now(), value });
+  }
+  return value;
+}
+
+async function resolveEmbed(url: string): Promise<ResumeEmbed> {
   let host = "";
   try {
     host = new URL(url).hostname.toLowerCase();
