@@ -14,19 +14,23 @@ type Search = { status?: string };
 const PRIORITY_TONE: Record<string, BadgeTone> = { low: "neutral", normal: "neutral", high: "warn", urgent: "danger" };
 
 export default async function OpeningsPage({ searchParams }: { searchParams: Promise<Search> }) {
-  const { supabase, access, user } = await getHrContext("planning");
+  const { supabase, access, user } = await getHrContext("openings");
   const sp = await searchParams;
   const status = sp.status ?? "all";
 
-  // RLS: HR staff see every opening, planning users only their own.
-  let query = supabase
+  // RLS: HR staff see every opening, planning users only their own. Interviewers
+  // may read them all but have no policy of their own, so they read through the
+  // service role — this page has no actions on it for them.
+  const admin = createAdminClient();
+  const readOnlyViewer = !access.hrStaff && !access.planning;
+  let query = (readOnlyViewer ? admin : supabase)
     .from("hr_openings")
     .select("id, code, designation, headcount, required_by, priority, status, acknowledged_at, raised_by, created_at, project:project_id(code, name)")
     .order("created_at", { ascending: false })
     .limit(300);
   if (status === "active") query = query.in("status", ["open", "in_progress"]);
   else if (status !== "all") query = query.eq("status", status);
-  if (!access.hrStaff) query = query.eq("raised_by", user.id);
+  if (!access.hrStaff && !access.interviewer) query = query.eq("raised_by", user.id);
 
   const [{ data }, stages] = await Promise.all([query, getStages()]);
   type Row = {
@@ -46,7 +50,6 @@ export default async function OpeningsPage({ searchParams }: { searchParams: Pro
 
   // Progress per opening. Planning users can't read candidates, so counts come
   // through the service role, limited to the openings already visible here.
-  const admin = createAdminClient();
   const ids = rows.map((r) => r.id);
   const [{ data: counts }, { data: people }] = await Promise.all([
     ids.length

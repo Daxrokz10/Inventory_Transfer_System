@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getAccess, getAuthUser, hasAnyHr, type Access } from "@/lib/auth";
 import { hrHome } from "@/lib/nav";
 
-export type HrNeed = "staff" | "interviewer" | "planning" | "any";
+export type HrNeed = "staff" | "interviewer" | "planning" | "openings" | "any";
 
 function allowed(a: Access, need: HrNeed): boolean {
   switch (need) {
@@ -13,6 +13,10 @@ function allowed(a: Access, need: HrNeed): boolean {
       return a.interviewer || a.hrStaff;
     case "planning":
       return a.planning || a.hrStaff;
+    case "openings":
+      // Anyone in HR may look at the openings; raising and editing is checked
+      // separately by the actions.
+      return a.planning || a.hrStaff || a.interviewer;
     default:
       return hasAnyHr(a);
   }

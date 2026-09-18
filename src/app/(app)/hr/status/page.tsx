@@ -62,7 +62,12 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
   ]);
 
   const allOpenings = (openingRows ?? []) as unknown as OpeningRow[];
-  const openings = allOpenings.filter((o) => !sp.opening || o.code === sp.opening);
+  // The board is about hiring still under way: filled and cancelled openings
+  // live on the Openings page, with their full timelines. Picking one in the
+  // filter still shows it.
+  const openings = allOpenings.filter((o) =>
+    sp.opening ? o.code === sp.opening : o.status === "open" || o.status === "in_progress",
+  );
   const finishedStages = stages.filter((s) => s.kind === "success" || s.kind === "closed").map((s) => s.name);
   const closedStages = stages.filter((s) => s.kind === "closed").map((s) => s.name);
   const inList = (names: string[]) => `(${names.map((n) => `"${n}"`).join(",")})`;
@@ -117,7 +122,7 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
     <div className="space-y-5">
       <PageHeader
         title="Status"
-        subtitle="Every opening, and how far each of its candidates has got."
+        subtitle="Openings still being hired for, and how far each candidate has got."
         actions={
           <Link href="/hr/settings#stages" className="text-sm font-medium text-accent hover:underline">
             Order stages
@@ -154,7 +159,8 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
       {groups.length === 0 && (
         <Card>
           <p className="text-sm text-ink-2">
-            No openings yet. Planning raises them from the Openings page; candidates without an opening appear here too.
+No openings are being hired for right now. Planning raises them from the Openings page; filled ones keep their
+            full timeline there, and candidates without an opening appear here too.
           </p>
         </Card>
       )}

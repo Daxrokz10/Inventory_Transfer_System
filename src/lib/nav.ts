@@ -84,7 +84,8 @@ function hrNav(a: Access): NavItem[] {
       { href: "/hr/openings", label: "Openings" },
       { href: "/hr/interviews", label: "Interviews" },
     );
-  } else if (a.planning) {
+  } else if (a.planning || a.interviewer) {
+    // Interviewers see what the company is hiring for, read-only.
     items.push({ href: "/hr/openings", label: "Openings" });
   }
   if (a.interviewer) items.push({ href: "/hr/my-interviews", label: "My Interviews" });

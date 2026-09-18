@@ -7,12 +7,12 @@ import { OPENING_STATUS_LABEL, PRIORITY_LABEL, getStages } from "@/lib/hr/data";
 import { OPENING_STATUS_TONE as STATUS_TONE, joiningNote, statusTone } from "@/lib/hr/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OpeningStatusForm, TagCandidateForm } from "../../HrForms";
-import { Timeline } from "../../Timeline";
+import { Timeline, TimelineStrip } from "../../Timeline";
 import { buildTimelines, type CandidateRow } from "@/lib/hr/progress";
 
 export default async function OpeningPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const { supabase, access, user } = await getHrContext("planning");
+  const { supabase, access, user } = await getHrContext("openings");
 
   const { data: o } = await supabase
     .from("hr_openings")
@@ -21,7 +21,7 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
     .maybeSingle();
   if (!o) notFound();
   const opening = o as unknown as typeof o & { project: { code: string; name: string } | null };
-  if (!access.hrStaff && opening.raised_by !== user.id) notFound();
+  if (!access.hrStaff && !access.interviewer && opening.raised_by !== user.id) notFound();
 
   const admin = createAdminClient();
   // First time HR opens it, it stops showing as "New".
@@ -38,12 +38,12 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
     access.hrStaff
       ? supabase
           .from("hr_candidates")
-          .select("id, candidate_code, name, designation, status, joined_on")
+          .select("id, candidate_code, name, designation, status, entry_date, created_at, opening_id, joined_on")
           .eq("opening_id", id)
           .order("updated_at", { ascending: false })
-          .limit(500)
-          .then((r) => r.data ?? [])
-      : Promise.resolve([]),
+          .limit(200)
+          .then((r) => (r.data ?? []) as CandidateRow[])
+      : Promise.resolve([] as CandidateRow[]),
   ]);
 
   const order = new Map(stages.map((s, i) => [s.name, i]));
@@ -54,20 +54,11 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
   // Whoever actually joined against this requirement. Their journey belongs
   // here, in full — the status board keeps only the one-line version.
   const joined = candidates.find((c) => c.joined_on);
-  const joinedNote = joined ? joiningNote(joined.joined_on, opening.required_by) : null;
-  const joinedTimeline = joined
-    ? (
-        await buildTimelines(
-          ((
-            await supabase
-              .from("hr_candidates")
-              .select("id, candidate_code, name, designation, status, entry_date, created_at, opening_id, joined_on")
-              .eq("id", joined.id)
-          ).data ?? []) as CandidateRow[],
-          [{ ...opening, raised_by: opening.raised_by }],
-        )
-      ).get(joined.id) ?? []
-    : [];
+  const joinedNote = joined ? joiningNote(joined.joined_on ?? null, opening.required_by) : null;
+  // Every tagged candidate's journey lives here — this is the page that tells
+  // the whole story of the requirement.
+  const timelines = await buildTimelines(candidates, [{ ...opening, raised_by: opening.raised_by }]);
+  const joinedTimeline = joined ? (timelines.get(joined.id) ?? []) : [];
 
   const facts: [string, string | null][] = [
     ["Site", opening.project ? `${opening.project.code} — ${opening.project.name}` : null],
@@ -182,12 +173,27 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
           ) : (
             <ul className="divide-y divide-line">
               {candidates.map((c) => (
-                <li key={c.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <Link href={`/hr/candidates/${c.id}`} className="font-medium text-accent hover:underline">
-                    {c.name}
-                  </Link>
-                  <span className="flex-1 text-ink-2">{c.designation ?? ""}</span>
-                  {c.status && <Badge tone={statusTone(c.status)}>{c.status}</Badge>}
+                <li key={c.id} className="space-y-2 py-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span>
+                      <Link href={`/hr/candidates/${c.id}`} className="font-medium text-accent hover:underline">
+                        {c.name}
+                      </Link>
+                      <span className="ml-2 text-ink-2">{c.designation ?? ""}</span>
+                      <span className="ml-2 font-mono text-[11px] text-ink-3">{c.candidate_code}</span>
+                    </span>
+                    {c.status && <Badge tone={statusTone(c.status)}>{c.status}</Badge>}
+                  </div>
+                  <details className="group">
+                    <summary className="cursor-pointer list-none">
+                      <TimelineStrip events={timelines.get(c.id) ?? []} />
+                      <span className="mt-1 inline-block text-xs text-accent group-open:hidden">show full timeline</span>
+                      <span className="mt-1 hidden text-xs text-accent group-open:inline">hide</span>
+                    </summary>
+                    <div className="mt-3 border-l border-line pl-1">
+                      <Timeline events={timelines.get(c.id) ?? []} />
+                    </div>
+                  </details>
                 </li>
               ))}
             </ul>
