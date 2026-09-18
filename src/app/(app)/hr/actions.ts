@@ -230,8 +230,9 @@ const todayIst = () =>
     new Date(),
   );
 
-/** Joining ends the process: record the day, and close the opening they were
-    hired for. Undoing the status clears it again. */
+/** Joining ends the process for that person: record the day, and move the
+    opening on — filled only once as many people have joined as were asked for.
+    Undoing the status clears it again. */
 async function settleJoining(supabase: Supabase, candidateId: string, status: string | null): Promise<void> {
   const stages = await listStages();
   const joined = Boolean(status && stages.find((s) => s.name === status)?.kind === "success");
@@ -245,6 +246,7 @@ async function settleJoining(supabase: Supabase, candidateId: string, status: st
 
   if (!joined) {
     if (c.joined_on) await supabase.from("hr_candidates").update({ joined_on: null }).eq("id", candidateId);
+    if (c.opening_id) await reopenIfShort(supabase, c.opening_id);
     return;
   }
 
@@ -254,19 +256,51 @@ async function settleJoining(supabase: Supabase, candidateId: string, status: st
 
   const { data: opening } = await supabase
     .from("hr_openings")
-    .select("code, status")
+    .select("code, status, headcount")
     .eq("id", c.opening_id)
     .maybeSingle();
-  if (!opening || opening.status === "filled" || opening.status === "cancelled") return;
+  if (!opening || opening.status === "cancelled") return;
 
-  await supabase.from("hr_openings").update({ status: "filled" }).eq("id", c.opening_id);
+  const { count } = await supabase
+    .from("hr_candidates")
+    .select("id", { count: "exact", head: true })
+    .eq("opening_id", c.opening_id)
+    .not("joined_on", "is", null);
+  const joinedCount = count ?? 1;
+  const needed = Math.max(1, opening.headcount);
+  const complete = joinedCount >= needed;
+  const next = complete ? "filled" : "in_progress";
+  if (opening.status !== next) await supabase.from("hr_openings").update({ status: next }).eq("id", c.opening_id);
+
   await notify(await hrStaffIds(), {
-    kind: "opening_filled",
-    title: `${opening.code} filled — ${c.name} joined`,
-    body: `Marked filled automatically when ${c.name} was set to ${status}.`,
+    kind: complete ? "opening_filled" : "opening_progress",
+    title: complete
+      ? `${opening.code} filled — ${c.name} joined`
+      : `${c.name} joined ${opening.code} — ${needed - joinedCount} still needed`,
+    body: `${joinedCount} of ${needed} joined.`,
     link: `/hr/openings/${c.opening_id}`,
   });
   revalidatePath("/hr/openings", "layout");
+}
+
+/** A joining undone (or a joiner untagged) can take an opening back below its
+    headcount; it should not stay marked filled. */
+async function reopenIfShort(supabase: Supabase, openingId: string): Promise<void> {
+  const { data: opening } = await supabase
+    .from("hr_openings")
+    .select("status, headcount")
+    .eq("id", openingId)
+    .maybeSingle();
+  if (!opening || opening.status !== "filled") return;
+  const { count } = await supabase
+    .from("hr_candidates")
+    .select("id", { count: "exact", head: true })
+    .eq("opening_id", openingId)
+    .not("joined_on", "is", null);
+  if ((count ?? 0) < Math.max(1, opening.headcount)) {
+    await supabase.from("hr_openings").update({ status: "in_progress" }).eq("id", openingId);
+    revalidatePath("/hr/openings", "layout");
+  }
 }
 
 export async function setCandidateResume(_prev: string | null, fd: FormData): Promise<string | null> {

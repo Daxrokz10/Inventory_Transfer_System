@@ -53,12 +53,11 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
 
   // Whoever actually joined against this requirement. Their journey belongs
   // here, in full — the status board keeps only the one-line version.
-  const joined = candidates.find((c) => c.joined_on);
-  const joinedNote = joined ? joiningNote(joined.joined_on ?? null, opening.required_by) : null;
+  const joiners = candidates.filter((c) => c.joined_on).sort((a, b) => (a.joined_on ?? "").localeCompare(b.joined_on ?? ""));
+  const stillNeeded = Math.max(0, Math.max(1, opening.headcount) - joiners.length);
   // Every tagged candidate's journey lives here — this is the page that tells
   // the whole story of the requirement.
   const timelines = await buildTimelines(candidates, [{ ...opening, raised_by: opening.raised_by }]);
-  const joinedTimeline = joined ? (timelines.get(joined.id) ?? []) : [];
 
   const facts: [string, string | null][] = [
     ["Site", opening.project ? `${opening.project.code} — ${opening.project.name}` : null],
@@ -85,13 +84,10 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
             <Badge tone={STATUS_TONE[opening.status]}>{OPENING_STATUS_LABEL[opening.status]}</Badge>
             {filled}/{opening.headcount} filled
           </p>
-          {joined && (
-            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-              <Link href={`/hr/candidates/${joined.id}`} className="font-medium text-accent hover:underline">
-                {joined.name}
-              </Link>
-              <span className="text-ink-2">joined</span>
-              {joinedNote && <Badge tone={joinedNote.tone}>{joinedNote.text}</Badge>}
+          {joiners.length > 0 && (
+            <p className="mt-2 text-sm text-ink-2">
+              {joiners.length} of {opening.headcount} joined
+              {stillNeeded > 0 ? ` · ${stillNeeded} still needed` : ""}
             </p>
           )}
         </div>
@@ -139,26 +135,30 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
         )}
       </div>
 
-      {access.hrStaff && joined && joinedTimeline.length > 0 && (
-        <Card className="p-0">
-          <details open className="group">
-            <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-5 py-3 text-sm">
-              <span>
-                <span className="font-semibold text-ink">{joined.name} joined</span>
-                <span className="ml-2 text-ink-2">the whole journey, from requirement to joining</span>
-              </span>
-              <span className="flex items-center gap-2">
-                {joinedNote && <Badge tone={joinedNote.tone}>{joinedNote.text}</Badge>}
-                <span className="text-xs text-accent group-open:hidden">show</span>
-                <span className="hidden text-xs text-accent group-open:inline">hide</span>
-              </span>
-            </summary>
-            <div className="border-t border-line px-5 py-4">
-              <Timeline events={joinedTimeline} />
-            </div>
-          </details>
-        </Card>
-      )}
+      {access.hrStaff &&
+        joiners.map((j) => {
+          const note = joiningNote(j.joined_on ?? null, opening.required_by);
+          return (
+            <Card key={j.id} className="p-0">
+              <details open className="group">
+                <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-5 py-3 text-sm">
+                  <span>
+                    <span className="font-semibold text-ink">{j.name} joined</span>
+                    <span className="ml-2 text-ink-2">the whole journey, from requirement to joining</span>
+                  </span>
+                  <span className="flex items-center gap-2">
+                    {note && <Badge tone={note.tone}>{note.text}</Badge>}
+                    <span className="text-xs text-accent group-open:hidden">show</span>
+                    <span className="hidden text-xs text-accent group-open:inline">hide</span>
+                  </span>
+                </summary>
+                <div className="border-t border-line px-5 py-4">
+                  <Timeline events={timelines.get(j.id) ?? []} />
+                </div>
+              </details>
+            </Card>
+          );
+        })}
 
       {access.hrStaff && (
         <Card className="space-y-3">

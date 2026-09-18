@@ -110,11 +110,13 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
   const { data: joinedRows } = openingIds.length
     ? await supabase.from("hr_candidates").select(CANDIDATE_COLUMNS).in("opening_id", openingIds).not("joined_on", "is", null)
     : { data: [] as CandidateRow[] };
-  const joinedBy = new Map<string, CandidateRow>();
-  for (const r of (joinedRows ?? []) as CandidateRow[]) if (r.opening_id) joinedBy.set(r.opening_id, r);
+  const joinedBy = new Map<string, CandidateRow[]>();
+  for (const r of (joinedRows ?? []) as CandidateRow[]) {
+    if (r.opening_id) joinedBy.set(r.opening_id, [...(joinedBy.get(r.opening_id) ?? []), r]);
+  }
 
   const timelines = await buildTimelines(
-    [...groups.flatMap((g) => g.rows), ...joinedBy.values()],
+    [...groups.flatMap((g) => g.rows), ...[...joinedBy.values()].flat()],
     allOpenings,
   );
 
@@ -166,9 +168,9 @@ No openings are being hired for right now. Planning raises them from the Opening
       )}
 
       {groups.map((g) => {
-        const joined = g.opening ? joinedBy.get(g.opening.id) : undefined;
-        const note = joined ? joiningNote(joined.joined_on ?? null, g.opening?.required_by ?? null) : null;
-        const rest = g.rows.filter((c) => c.id !== joined?.id);
+        const joiners = (g.opening ? joinedBy.get(g.opening.id) : undefined) ?? [];
+        const joinedIds = new Set(joiners.map((j) => j.id));
+        const rest = g.rows.filter((c) => !joinedIds.has(c.id));
         return (
         <Card key={g.opening?.id ?? "none"} className="p-0">
           <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-3">
@@ -179,7 +181,11 @@ No openings are being hired for right now. Planning raises them from the Opening
                 </Link>
                 <p className="text-xs text-ink-2">
                   {g.opening.project ? `${g.opening.project.code} · ` : ""}
-                  {g.opening.headcount} needed · raised{" "}
+                  {g.opening.headcount} needed
+                  {joiners.length > 0
+                    ? ` · ${joiners.length} joined · ${Math.max(0, g.opening.headcount - joiners.length)} still needed`
+                    : ""}{" "}
+                  · raised{" "}
                   {new Date(g.opening.created_at).toLocaleDateString("en-IN", {
                     day: "2-digit",
                     month: "short",
@@ -206,8 +212,10 @@ No openings are being hired for right now. Planning raises them from the Opening
             </div>
           </header>
 
-          {joined && (
-            <section id={`cand-${joined.id}`} className="border-b border-line bg-good-soft/40 px-5 py-4">
+          {joiners.map((joined) => {
+            const note = joiningNote(joined.joined_on ?? null, g.opening?.required_by ?? null);
+            return (
+            <section key={joined.id} id={`cand-${joined.id}`} className="border-b border-line bg-good-soft/40 px-5 py-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <p className="text-sm">
                   <Link href={`/hr/candidates/${joined.id}`} className="font-semibold text-accent hover:underline">
@@ -228,10 +236,11 @@ No openings are being hired for right now. Planning raises them from the Opening
               </p>
               <TimelineStrip events={timelines.get(joined.id) ?? []} />
             </section>
-          )}
+            );
+          })}
 
           <ul className="divide-y divide-line">
-            {rest.length === 0 && !joined && (
+            {rest.length === 0 && joiners.length === 0 && (
               <li className="px-5 py-4 text-sm text-ink-2">No candidates for this filter.</li>
             )}
             {rest.map((c) => (
