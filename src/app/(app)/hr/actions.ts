@@ -8,6 +8,7 @@ import { getHrContext } from "@/lib/hr/auth";
 import { forgetCachedToken, listWorksheets, resolveShareUrl } from "@/lib/hr/graph";
 import { CANDIDATE_FIELDS, rowHash, sameCell, type CandidateField, type CandidateValues } from "@/lib/hr/sheet";
 import { SKILLS, parseScores, type Scores } from "@/lib/hr/evaluation";
+import { listPeople } from "@/lib/hr/people";
 import { listStages, nextStatus, panelVerdict } from "@/lib/hr/stageFlow";
 import {
   ExcelConflictError,
@@ -354,7 +355,7 @@ async function nonInterviewers(ids: string[]): Promise<string | null> {
 }
 
 export async function assignPanel(_prev: string | null, fd: FormData): Promise<string | null> {
-  const { supabase, user } = await getHrContext("staff");
+  const { supabase, user, access } = await getHrContext("any");
   const candidate_id = text(fd, "candidate_id");
   const interviewers = [...new Set(fd.getAll("interviewer_id").map(String).filter(Boolean))];
   if (!candidate_id) return "Missing candidate.";
@@ -364,16 +365,29 @@ export async function assignPanel(_prev: string | null, fd: FormData): Promise<s
   if (notInterviewers) return notInterviewers;
 
   const round = Number(text(fd, "round") ?? 1) || 1;
+  const { data: existing } = await supabase
+    .from("hr_interviews")
+    .select("state, round, interviewer_id")
+    .eq("candidate_id", candidate_id);
+  const rounds = existing ?? [];
+
   // A round where everyone has already given feedback is finished; more
   // interviewers belong in a new round.
-  const { data: sameRound } = await supabase
-    .from("hr_interviews")
-    .select("state")
-    .eq("candidate_id", candidate_id)
-    .eq("round", round);
-  const liveSameRound = (sameRound ?? []).filter((r) => r.state !== "cancelled");
+  const liveSameRound = rounds.filter((r) => r.round === round && r.state !== "cancelled");
   if (liveSameRound.length && liveSameRound.every((r) => r.state === "completed")) {
     return `Round ${round} is already finished — start the next round instead.`;
+  }
+
+  // An interviewer on this candidate can pass them on to the next round, but
+  // nothing else: no adding people to a round already under way, and only for
+  // a candidate they have actually interviewed.
+  const asInterviewer = !access.hrStaff;
+  if (asInterviewer) {
+    if (!rounds.some((r) => r.interviewer_id === user.id && r.state !== "cancelled")) {
+      return "Only HR, or an interviewer on this candidate, can send them for an interview.";
+    }
+    const highest = Math.max(0, ...rounds.filter((r) => r.state !== "cancelled").map((r) => r.round));
+    if (round <= highest) return "You can only set up the next round. Ask HR to change a round already under way.";
   }
 
   const panel_id = crypto.randomUUID();
@@ -386,10 +400,25 @@ export async function assignPanel(_prev: string | null, fd: FormData): Promise<s
     hr_note: text(fd, "hr_note"),
     assigned_by: user.id,
   };
-  const { error } = await supabase.from("hr_interviews").insert(interviewers.map((interviewer_id) => ({ ...shared, interviewer_id })));
+  // Interviewers have no insert rights of their own, so their round goes in
+  // through the service role after the checks above.
+  const writer = asInterviewer ? (createAdminClient() as unknown as Supabase) : supabase;
+  const { error } = await writer.from("hr_interviews").insert(interviewers.map((interviewer_id) => ({ ...shared, interviewer_id })));
   if (error) return error.message;
 
   await notifyInterviewers(supabase, interviewers, candidate_id, shared.round, shared.scheduled_at, shared.mode);
+  if (asInterviewer) {
+    const { data: c } = await supabase.from("hr_candidates").select("name").eq("id", candidate_id).maybeSingle();
+    const people = await listPeople();
+    await notify(await hrStaffIds(), {
+      kind: "interview_assigned",
+      title: `Round ${round} set up for ${c?.name ?? "a candidate"}`,
+      body: `By ${people.find((p) => p.id === user.id)?.name ?? "an interviewer"} · ${interviewers
+        .map((i) => people.find((p) => p.id === i)?.name ?? "someone")
+        .join(", ")}`,
+      link: `/hr/candidates/${candidate_id}`,
+    });
+  }
 
   revalidateHr(candidate_id);
   return null;

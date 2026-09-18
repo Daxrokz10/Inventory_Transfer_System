@@ -92,6 +92,8 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
     (a, b) => a - b,
   );
   const nextRound = (liveRounds.at(-1) ?? 0) + 1;
+  // An interviewer who took one of this candidate's rounds may set up the next.
+  const onThisCandidate = panelList.some((p) => p.some((i) => i.interviewer_id === user.id && i.state !== "cancelled"));
   // A round everyone has already given feedback on is finished: interviewers
   // can only be added to a round still waiting on someone.
   const openRounds = liveRounds.filter((r) =>
@@ -305,9 +307,14 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
             </ul>
           </Card>
 
-          {isHr && (
+          {(isHr || onThisCandidate) && (
             <Card className="space-y-4">
-              <CardLabel>Send for interview</CardLabel>
+              <CardLabel>{isHr ? "Send for interview" : "Send to the next round"}</CardLabel>
+              {!isHr && (
+                <p className="text-sm text-ink-2">
+                  Pass this candidate on to whoever should take round {nextRound}. HR is told, and can change it.
+                </p>
+              )}
               {interviewers.length === 0 ? (
                 <p className="text-sm text-ink-2">
                   Nobody has Interviewer access yet. Switch it on for people in the Control Panel.
@@ -316,7 +323,7 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
                 <AssignPanelForm
                   candidateId={c.id}
                   nextRound={nextRound}
-                  existingRounds={openRounds}
+                  existingRounds={isHr ? openRounds : []}
                   people={interviewers}
                 />
               )}
