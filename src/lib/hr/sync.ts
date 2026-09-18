@@ -352,7 +352,7 @@ export async function syncFromExcel(): Promise<SyncResult> {
     const appOnly = existing.filter((e) => e.synced_at === null && !seen.has(e.candidate_code.toUpperCase()));
     let appendAt = layout.lastRow + 1;
     for (const cand of appOnly) {
-      await writeRow(sheet, appendAt, cand);
+      await writeNewRow(sheet, appendAt, cand);
       await admin
         .from("hr_candidates")
         .update({ excel_row: appendAt, synced_at: now, sheet_hash: rowHash(cand) })
@@ -391,17 +391,32 @@ export async function syncIfStale(maxAgeMs = 120_000): Promise<void> {
 
 /* ---------------- write (app → Excel) ---------------- */
 
-async function writeRow({ conn, layout }: Sheet, row: number, v: Partial<CandidateValues>) {
-  const mapped = (Object.entries(layout.cols) as [CandidateField, number][]).filter(([f]) => f in v);
+function cellValue(f: CandidateField, v: Partial<CandidateValues>): string {
+  const val = v[f] ?? "";
+  const url = f === "resume_url" ? asUrl(val) : null;
+  return url ? hyperlinkFormula(url) : val;
+}
+
+const mappedFields = (layout: SheetLayout, v: Partial<CandidateValues>) =>
+  (Object.entries(layout.cols) as [CandidateField, number][]).filter(([f]) => f in v);
+
+/** Edit one candidate: each changed cell is written on its own, so a column in
+    between (Notice Period, Source, anything HR keeps outside the app) is never
+    part of the write at all. */
+async function writeCells({ conn, layout }: Sheet, row: number, v: Partial<CandidateValues>) {
+  for (const [f, c] of mappedFields(layout, v)) {
+    await writeBlock(conn.drive_id, conn.item_id, conn.sheet_name, row, c, [[cellValue(f, v)]]);
+  }
+}
+
+/** A brand-new row at the end of the sheet: one write for the whole row. */
+async function writeNewRow({ conn, layout }: Sheet, row: number, v: Partial<CandidateValues>) {
+  const mapped = mappedFields(layout, v);
   if (!mapped.length) return;
   const start = Math.min(...mapped.map(([, c]) => c));
   const end = Math.max(...mapped.map(([, c]) => c));
   const cells: (string | null)[] = Array(end - start + 1).fill(null);
-  for (const [f, c] of mapped) {
-    const val = v[f] ?? "";
-    const url = f === "resume_url" ? asUrl(val) : null;
-    cells[c - start] = url ? hyperlinkFormula(url) : val;
-  }
+  for (const [f, c] of mapped) cells[c - start] = cellValue(f, v);
   await writeBlock(conn.drive_id, conn.item_id, conn.sheet_name, row, start, [cells]);
 }
 
@@ -442,7 +457,7 @@ export async function patchCandidateInExcel(
     );
   }
 
-  await writeRow(sheet, row, changes);
+  await writeCells(sheet, row, changes);
   return row;
 }
 
@@ -455,7 +470,7 @@ export async function appendCandidateToExcel(values: Omit<CandidateValues, "cand
   const ids = await readIdColumn(sheet);
   const code = await nextCandidateCode([...ids.keys()]);
   const row = sheet.layout.lastRow + 1;
-  await writeRow(sheet, row, { ...values, candidate_code: code });
+  await writeNewRow(sheet, row, { ...values, candidate_code: code });
   return { row, code };
 }
 

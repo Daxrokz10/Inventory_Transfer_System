@@ -13,12 +13,13 @@ import {
   AssignPanelForm,
   CancelPanelButton,
   EditCandidateForm,
-  FeedbackForm,
+  HrDecisionForm,
   OpeningForm,
   RemoveInterviewerButton,
   ResumeLinkForm,
   StatusForm,
 } from "../../HrForms";
+import { Timeline, buildTimeline } from "../../Timeline";
 
 type Interview = {
   id: string;
@@ -45,7 +46,7 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
   const { data: c } = await supabase
     .from("hr_candidates")
     .select(
-      "id, candidate_code, entry_date, name, designation, phone, current_salary, expected_salary, experience_years, industry_experience, hr_remarks, job_change_reason, status, resume_url, opening_code, opening_id, excel_row",
+      "id, candidate_code, entry_date, created_at, name, designation, phone, current_salary, expected_salary, experience_years, industry_experience, hr_remarks, job_change_reason, status, resume_url, opening_code, opening_id, excel_row, offered_salary, date_of_joining, hr_comments",
     )
     .eq("id", id)
     .maybeSingle();
@@ -69,6 +70,15 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
     isHr ? getOpenOpenings() : Promise.resolve([]),
   ]);
   const nameOf = new Map(people.map((p) => [p.id, p.name]));
+
+  // The opening this candidate was tagged to, for the start of the timeline.
+  const { data: opening } = c.opening_id
+    ? await supabase
+        .from("hr_openings")
+        .select("id, code, designation, headcount, created_at, raised_by")
+        .eq("id", c.opening_id)
+        .maybeSingle()
+    : { data: null };
   // Only people with Interviewer access can be sent candidates.
   const interviewers = people.filter((p) => p.canInterview).map(({ id, label }) => ({ id, label }));
 
@@ -78,8 +88,43 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
     panels.set(iv.panel_id, [...(panels.get(iv.panel_id) ?? []), iv]);
   }
   const panelList = [...panels.values()].sort((a, b) => a[0].round - b[0].round || a[0].created_at.localeCompare(b[0].created_at));
-  const nextRound =
-    Math.max(0, ...panelList.filter((p) => p.some((i) => i.state !== "cancelled")).map((p) => p[0].round)) + 1;
+  const liveRounds = [...new Set(panelList.filter((p) => p.some((i) => i.state !== "cancelled")).map((p) => p[0].round))].sort(
+    (a, b) => a - b,
+  );
+  const nextRound = (liveRounds.at(-1) ?? 0) + 1;
+  // A round everyone has already given feedback on is finished: interviewers
+  // can only be added to a round still waiting on someone.
+  const openRounds = liveRounds.filter((r) =>
+    panelList.some((p) => p[0].round === r && p.some((i) => i.state === "assigned")),
+  );
+  // Panels grouped by round number, so "Round 2" reads as one step even when
+  // its interviewers were added at different times.
+  const rounds = [...new Set(panelList.map((p) => p[0].round))]
+    .sort((a, b) => a - b)
+    .map((round) => ({ round, panels: panelList.filter((p) => p[0].round === round) }));
+
+  const timeline = buildTimeline({
+    candidate: { entry_date: c.entry_date, created_at: c.created_at, status: c.status, name: c.name },
+    opening: opening
+      ? { ...opening, raiser: opening.raised_by ? (nameOf.get(opening.raised_by) ?? null) : null }
+      : null,
+    history: [...(history ?? [])].reverse(),
+    panels: panelList.map((panel) => ({
+      panel_id: panel[0].panel_id,
+      round: panel[0].round,
+      scheduled_at: panel[0].scheduled_at,
+      mode: panel[0].mode,
+      created_at: panel[0].created_at,
+      members: panel.map((iv) => ({
+        name: nameOf.get(iv.interviewer_id) ?? "Unknown",
+        state: iv.state,
+        recommendation: iv.recommendation,
+        rating: iv.rating,
+        completed_at: iv.completed_at,
+      })),
+    })),
+    nameOf,
+  });
 
   const details: [string, string | null][] = [
     [FIELD_LABELS.entry_date, c.entry_date],
@@ -152,11 +197,32 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
             </div>
           </Card>
 
+          {isHr && (
+            <Card className="space-y-3">
+              <CardLabel>HR decision</CardLabel>
+              <HrDecisionForm
+                id={c.id}
+                offeredSalary={c.offered_salary}
+                dateOfJoining={c.date_of_joining}
+                comments={c.hr_comments}
+              />
+            </Card>
+          )}
+
+          <Card className="space-y-4">
+            <CardLabel>Progress</CardLabel>
+            <Timeline events={timeline} />
+          </Card>
+
           <Card className="space-y-4">
             <CardLabel>Interviews</CardLabel>
             {panelList.length === 0 && <p className="text-sm text-ink-2">No interviews yet.</p>}
-            <ul className="space-y-3">
-              {panelList.map((panel) => {
+            <ul className="space-y-5">
+              {rounds.map(({ round, panels: roundPanels }) => (
+                <li key={round} className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-3">Round {round}</p>
+                  <ul className="space-y-3">
+              {roundPanels.map((panel) => {
                 const head = panel[0];
                 const live = panel.filter((i) => i.state !== "cancelled");
                 const done = live.filter((i) => i.state === "completed").length;
@@ -165,12 +231,9 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
                 return (
                   <li key={head.panel_id} className="space-y-2 rounded-md border border-line p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-ink">
-                        Round {head.round}
-                        <span className="ml-2 text-xs font-normal text-ink-2">
-                          {fmtDateTime(head.scheduled_at)}
-                          {head.mode && ` · ${head.mode}`}
-                        </span>
+                      <p className="text-sm text-ink-2">
+                        {fmtDateTime(head.scheduled_at)}
+                        {head.mode && ` · ${head.mode}`}
                       </p>
                       {allCancelled ? (
                         <Badge>Cancelled</Badge>
@@ -211,30 +274,34 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
                                 <span className="block text-xs text-ink-3">{fmtDateTime(iv.completed_at)}</span>
                               </p>
                             )}
-                            {mine && iv.state === "assigned" && (
-                              <div className="mt-2 border-t border-line pt-3">
-                                <FeedbackForm id={iv.id} />
-                              </div>
+                            {(mine || iv.state === "completed") && (
+                              <Link
+                                href={`/hr/evaluate/${iv.id}`}
+                                className="mt-1 inline-block text-xs font-medium text-accent hover:underline"
+                              >
+                                {mine && iv.state === "assigned" ? "Open evaluation form →" : "View evaluation form →"}
+                              </Link>
                             )}
                           </li>
                         );
                       })}
                     </ul>
 
-                    {isHr && !allCancelled && (
+                    {isHr && !allCancelled && live.some((i) => i.state === "assigned") && (
                       <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                         <AddPanelInterviewerForm
                           panelId={head.panel_id}
                           people={interviewers.filter((p) => !onPanel.has(p.id))}
                         />
-                        {live.some((i) => i.state === "assigned") && (
-                          <CancelPanelButton panelId={head.panel_id} candidateId={c.id} />
-                        )}
+                        <CancelPanelButton panelId={head.panel_id} candidateId={c.id} />
                       </div>
                     )}
                   </li>
                 );
               })}
+                  </ul>
+                </li>
+              ))}
             </ul>
           </Card>
 
@@ -246,29 +313,16 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
                   Nobody has Interviewer access yet. Switch it on for people in the Control Panel.
                 </p>
               ) : (
-                <AssignPanelForm candidateId={c.id} nextRound={nextRound} people={interviewers} />
+                <AssignPanelForm
+                  candidateId={c.id}
+                  nextRound={nextRound}
+                  existingRounds={openRounds}
+                  people={interviewers}
+                />
               )}
             </Card>
           )}
 
-          {(history ?? []).length > 0 && (
-            <Card className="space-y-3">
-              <CardLabel>Status history</CardLabel>
-              <ul className="space-y-1.5 text-sm">
-                {(history ?? []).map((h, i) => (
-                  <li key={i} className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="text-ink">
-                      {h.from_status ?? "—"} → <b>{h.to_status ?? "—"}</b>
-                    </span>
-                    <span className="text-xs text-ink-3">
-                      {fmtDateTime(h.changed_at)} ·{" "}
-                      {h.source === "excel" ? "in Excel" : (nameOf.get(h.changed_by ?? "") ?? "app")}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
         </div>
 
         <Card className="space-y-3 xl:col-span-3">
@@ -283,6 +337,7 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
               {isHr && c.resume_url && <ResumeLinkForm id={c.id} url={c.resume_url} />}
             </div>
           </div>
+          {embed.note && <p className="rounded-md bg-warn-soft px-3 py-2 text-xs text-warn">{embed.note}</p>}
           {embed.src ? (
             <iframe
               src={embed.src}

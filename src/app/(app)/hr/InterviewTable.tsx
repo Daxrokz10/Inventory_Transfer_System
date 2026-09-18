@@ -35,6 +35,7 @@ export function InterviewTable({
           {showInterviewer && <TH>Interviewer</TH>}
           <TH>Result</TH>
           <TH>Candidate status</TH>
+          <TH> </TH>
         </tr>
       </thead>
       <tbody>
@@ -69,6 +70,11 @@ export function InterviewTable({
             </TD>
             <TD>
               {r.candidate?.status ? <Badge tone={statusTone(r.candidate.status)}>{r.candidate.status}</Badge> : "—"}
+            </TD>
+            <TD className="whitespace-nowrap">
+              <Link href={`/hr/evaluate/${r.id}`} className="text-xs font-medium text-accent hover:underline">
+                {r.state === "completed" ? "View form →" : "Open form →"}
+              </Link>
             </TD>
           </TRow>
         ))}

@@ -25,7 +25,7 @@ type Row = {
 export default async function InterviewsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const { supabase } = await getHrContext("staff");
   const sp = await searchParams;
-  const state = sp.state ?? "pending";
+  const state = sp.state ?? "all";
 
   const [{ data }, people] = await Promise.all([
     supabase
@@ -62,10 +62,10 @@ export default async function InterviewsPage({ searchParams }: { searchParams: P
 
       <form method="get" className="flex flex-wrap items-end gap-3">
         <Select name="state" defaultValue={state}>
+          <option value="all">All interviews</option>
           <option value="pending">Awaiting feedback</option>
           <option value="completed">All feedback in</option>
           <option value="cancelled">Cancelled</option>
-          <option value="all">All</option>
         </Select>
         <Select name="interviewer" defaultValue={sp.interviewer ?? ""}>
           <option value="">All interviewers</option>

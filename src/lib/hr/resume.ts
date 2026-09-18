@@ -5,7 +5,9 @@ import { getConnection, isExcelReady } from "./sync";
     OneDrive / SharePoint links go through Graph's preview action (the plain
     share link refuses to be framed); Google Drive and direct PDFs are
     rewritten or used as-is. Returns null when no embed is possible. */
-export async function resumeEmbedUrl(url: string | null): Promise<{ src: string | null; error?: string }> {
+export async function resumeEmbedUrl(
+  url: string | null,
+): Promise<{ src: string | null; error?: string; note?: string }> {
   if (!url) return { src: null };
   let host = "";
   try {
@@ -24,11 +26,14 @@ export async function resumeEmbedUrl(url: string | null): Promise<{ src: string 
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (/permission|no longer exists|accessDenied|itemNotFound/i.test(msg)) {
+        // The connected account can't open this file (HR shared it with named
+        // people only). Fall back to SharePoint's own embed view, which loads
+        // with the *viewer's* Microsoft login instead of the app's.
         return {
-          src: null,
-          error:
-            `The Microsoft account connected in HR → Settings (${conn.account_email ?? "unknown"}) can't open this file. ` +
-            "Connect the account that owns the resumes, or share the resumes folder with this account.",
+          src: `${url}${url.includes("?") ? "&" : "?"}action=embedview`,
+          note:
+            `Shown with your own Microsoft sign-in: the account connected in HR → Settings ` +
+            `(${conn.account_email ?? "unknown"}) doesn't have access to this file.`,
         };
       }
       return { src: null, error: msg };

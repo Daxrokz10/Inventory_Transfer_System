@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export type Stage = { name: string; sort_order: number; kind: "active" | "hold" | "success" | "closed" };
 
@@ -33,3 +34,26 @@ export const PRIORITY_LABEL: Record<string, string> = {
   high: "High",
   urgent: "Urgent",
 };
+
+/** Job titles taken from the candidates themselves, so openings and quick add
+    use one consistent list. Spellings that differ only by case or punctuation
+    are merged, keeping the most common one. Read with the service role
+    because planning users can't read candidates. */
+export async function getDesignations(minCount = 2): Promise<string[]> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("hr_designations").select("designation, n");
+  const groups = new Map<string, { n: number; spellings: Map<string, number> }>();
+  for (const row of data ?? []) {
+    const title = String(row.designation).trim();
+    if (!title) continue;
+    const key = title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const g = groups.get(key) ?? { n: 0, spellings: new Map<string, number>() };
+    g.n += row.n;
+    g.spellings.set(title, (g.spellings.get(title) ?? 0) + row.n);
+    groups.set(key, g);
+  }
+  return [...groups.values()]
+    .filter((g) => g.n >= minCount)
+    .map((g) => [...g.spellings.entries()].sort((a, b) => b[1] - a[1])[0][0])
+    .sort((a, b) => a.localeCompare(b));
+}

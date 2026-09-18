@@ -13,6 +13,7 @@ import {
   addStage,
   quickAddCandidate,
   removePanelInterviewer,
+  saveHrDecision,
   saveStages,
   saveWorkbook,
   setCandidateOpening,
@@ -46,10 +47,12 @@ export type PersonOption = { id: string; label: string };
 export function QuickAddForm({
   stages,
   openings,
+  designations,
   defaultStatus,
 }: {
   stages: string[];
   openings: OpeningOption[];
+  designations: string[];
   defaultStatus: string | null;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -83,7 +86,12 @@ export function QuickAddForm({
           <Input name="name" required autoFocus />
         </Field>
         <Field label="Designation">
-          <Input name="designation" />
+          <Input name="designation" list="hr-designations" autoComplete="off" />
+          <datalist id="hr-designations">
+            {designations.map((d) => (
+              <option key={d} value={d} />
+            ))}
+          </datalist>
         </Field>
         <Field label="Phone">
           <Input name="phone" inputMode="tel" />
@@ -283,10 +291,12 @@ export function OpeningForm({ id, code, openings }: { id: string; code: string |
 export function AssignPanelForm({
   candidateId,
   nextRound,
+  existingRounds,
   people,
 }: {
   candidateId: string;
   nextRound: number;
+  existingRounds: number[];
   people: PersonOption[];
 }) {
   const formRef = useRef<HTMLFormElement>(null);
@@ -352,8 +362,15 @@ export function AssignPanelForm({
         <Field label="Date & time">
           <Input name="scheduled_at" type="datetime-local" />
         </Field>
-        <Field label="Round">
-          <Input name="round" type="number" min={1} defaultValue={nextRound} />
+        <Field label="Which round *" hint="Each round is a separate step in the candidate's progress.">
+          <Select name="round" defaultValue={String(nextRound)}>
+            {existingRounds.map((r) => (
+              <option key={r} value={r}>
+                Round {r} — add interviewers to this round
+              </option>
+            ))}
+            <option value={nextRound}>Round {nextRound} — new round</option>
+          </Select>
         </Field>
         <Field label="Mode / location" className="sm:col-span-2">
           <Input name="mode" placeholder="In person — Head office, Phone, Video call…" />
@@ -490,14 +507,36 @@ export function FeedbackForm({ id }: { id: string }) {
 
 /* ---------------- openings ---------------- */
 
-export function NewOpeningForm({ projects }: { projects: { id: string; code: string; name: string }[] }) {
+export function NewOpeningForm({
+  projects,
+  designations,
+}: {
+  projects: { id: string; code: string; name: string }[];
+  designations: string[];
+}) {
   const [error, action, pending] = useActionState(createOpening, null);
+  const [title, setTitle] = useState("");
   return (
     <form action={action} onKeyDown={blockEnter} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Designation / post *">
-          <Input name="designation" required placeholder="Site Engineer" />
+        <Field label="Designation / post *" hint="Same titles the candidate sheet uses.">
+          <Select name="designation" required value={title} onChange={(e) => setTitle(e.target.value)}>
+            <option value="" disabled>
+              Choose a title
+            </option>
+            {designations.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+            <option value="__other">Other…</option>
+          </Select>
         </Field>
+        {title === "__other" && (
+          <Field label="New title *">
+            <Input name="designation_other" required placeholder="e.g. Quantity Surveyor" />
+          </Field>
+        )}
         <Field label="Site">
           <Select name="project_id" defaultValue="">
             <option value="">Not site-specific</option>
@@ -705,6 +744,69 @@ export function InlineStatusSelect({ id, status, stages }: { id: string; status:
       </select>
       {pending && <span className="text-[10px] text-ink-3">Saving…</span>}
       {error && <span className="max-w-48 text-[10px] leading-tight text-danger">{error}</span>}
+    </form>
+  );
+}
+
+/** Quick add is hidden until needed, so the list is the first thing you see. */
+export function QuickAddPanel(props: React.ComponentProps<typeof QuickAddForm>) {
+  const [open, setOpen] = useState(false);
+  if (!open) return <Button onClick={() => setOpen(true)}>+ Add candidate</Button>;
+  return (
+    <div className="w-full rounded-lg border border-line bg-surface p-5 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">Quick add</p>
+        <button type="button" onClick={() => setOpen(false)} className="text-sm text-ink-2 hover:underline">
+          Close
+        </button>
+      </div>
+      <QuickAddForm {...props} />
+    </div>
+  );
+}
+
+/** The HR block at the foot of the evaluation form: what was offered and when
+    they join. Kept in the app, not written to the Excel. */
+/** A date input needs yyyy-mm-dd; older rows may hold dd/mm/yyyy text. */
+function isoDay(v: string | null): string {
+  if (!v) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v.trim())) return v.trim();
+  const m = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(v.trim());
+  return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : "";
+}
+
+export function HrDecisionForm({
+  id,
+  offeredSalary,
+  dateOfJoining,
+  comments,
+}: {
+  id: string;
+  offeredSalary: string | null;
+  dateOfJoining: string | null;
+  comments: string | null;
+}) {
+  const [msg, action, pending] = useActionState(saveHrDecision, null);
+  return (
+    <form action={action} onKeyDown={blockEnter} className="space-y-3">
+      <input type="hidden" name="id" value={id} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Offered salary">
+          <Input name="offered_salary" defaultValue={offeredSalary ?? ""} />
+        </Field>
+        <Field label="Date of joining" hint="Compared with the opening's required-by date.">
+          <Input name="date_of_joining" type="date" defaultValue={isoDay(dateOfJoining)} />
+        </Field>
+      </div>
+      <Field label="Comments">
+        <Textarea name="hr_comments" rows={2} defaultValue={comments ?? ""} />
+      </Field>
+      <div className="flex items-center gap-3">
+        <Button type="submit" size="sm" disabled={pending}>
+          {pending ? "Saving…" : "Save"}
+        </Button>
+        {msg && <span className={msg === "Saved." ? "text-xs text-good" : "text-xs text-danger"}>{msg}</span>}
+      </div>
     </form>
   );
 }

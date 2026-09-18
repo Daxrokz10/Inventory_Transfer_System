@@ -7,6 +7,8 @@ import { hrStaffIds, notify } from "@/lib/notify";
 import { getHrContext } from "@/lib/hr/auth";
 import { forgetCachedToken, listWorksheets, resolveShareUrl } from "@/lib/hr/graph";
 import { CANDIDATE_FIELDS, rowHash, sameCell, type CandidateField, type CandidateValues } from "@/lib/hr/sheet";
+import { SKILLS, parseScores, type Scores } from "@/lib/hr/evaluation";
+import { listStages, nextStatus, panelVerdict } from "@/lib/hr/stageFlow";
 import {
   ExcelConflictError,
   appendCandidateToExcel,
@@ -207,7 +209,63 @@ export async function setCandidateStatus(_prev: string | null, fd: FormData): Pr
   const id = text(fd, "id");
   if (!id) return "Missing candidate.";
   const status = fd.get("status") === "__custom" ? text(fd, "status_custom") : text(fd, "status");
-  return applyChange(supabase, user.id, id, { status });
+  const err = await applyChange(supabase, user.id, id, { status });
+  if (!err) await settleJoining(supabase, id, status);
+  return err;
+}
+
+/** dd/mm/yyyy or yyyy-mm-dd → yyyy-mm-dd. */
+function parseDay(s: string | null): string | null {
+  if (!s) return null;
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
+  if (iso) return s.trim();
+  const dmy = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(s.trim());
+  if (!dmy) return null;
+  return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+}
+
+const todayIst = () =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(
+    new Date(),
+  );
+
+/** Joining ends the process: record the day, and close the opening they were
+    hired for. Undoing the status clears it again. */
+async function settleJoining(supabase: Supabase, candidateId: string, status: string | null): Promise<void> {
+  const stages = await listStages();
+  const joined = Boolean(status && stages.find((s) => s.name === status)?.kind === "success");
+
+  const { data: c } = await supabase
+    .from("hr_candidates")
+    .select("name, opening_id, joined_on, date_of_joining")
+    .eq("id", candidateId)
+    .maybeSingle();
+  if (!c) return;
+
+  if (!joined) {
+    if (c.joined_on) await supabase.from("hr_candidates").update({ joined_on: null }).eq("id", candidateId);
+    return;
+  }
+
+  const day = parseDay(c.date_of_joining) ?? c.joined_on ?? todayIst();
+  await supabase.from("hr_candidates").update({ joined_on: day }).eq("id", candidateId);
+  if (!c.opening_id) return;
+
+  const { data: opening } = await supabase
+    .from("hr_openings")
+    .select("code, status")
+    .eq("id", c.opening_id)
+    .maybeSingle();
+  if (!opening || opening.status === "filled" || opening.status === "cancelled") return;
+
+  await supabase.from("hr_openings").update({ status: "filled" }).eq("id", c.opening_id);
+  await notify(await hrStaffIds(), {
+    kind: "opening_filled",
+    title: `${opening.code} filled — ${c.name} joined`,
+    body: `Marked filled automatically when ${c.name} was set to ${status}.`,
+    link: `/hr/openings/${c.opening_id}`,
+  });
+  revalidatePath("/hr/openings", "layout");
 }
 
 export async function setCandidateResume(_prev: string | null, fd: FormData): Promise<string | null> {
@@ -239,6 +297,29 @@ export async function tagCandidateToOpening(_prev: string | null, fd: FormData):
   const r = await applyChange(supabase, user.id, c.id, { opening_code: openingCode });
   revalidatePath("/hr/openings", "layout");
   return r;
+}
+
+/** The HR block at the foot of the evaluation form. App-only: these fields
+    aren't columns in the Excel. */
+export async function saveHrDecision(_prev: string | null, fd: FormData): Promise<string | null> {
+  const { supabase } = await getHrContext("staff");
+  const id = text(fd, "id");
+  if (!id) return "Missing candidate.";
+  const { error } = await supabase
+    .from("hr_candidates")
+    .update({
+      offered_salary: text(fd, "offered_salary"),
+      date_of_joining: text(fd, "date_of_joining"),
+      hr_comments: text(fd, "hr_comments"),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  if (error) return error.message;
+  // Keep the joining day in step with the date HR just typed.
+  const { data: c } = await supabase.from("hr_candidates").select("status").eq("id", id).maybeSingle();
+  await settleJoining(supabase, id, c?.status ?? null);
+  revalidateHr(id);
+  return "Saved.";
 }
 
 /* ---------------- interview panels ---------------- */
@@ -282,11 +363,24 @@ export async function assignPanel(_prev: string | null, fd: FormData): Promise<s
   const notInterviewers = await nonInterviewers(interviewers);
   if (notInterviewers) return notInterviewers;
 
+  const round = Number(text(fd, "round") ?? 1) || 1;
+  // A round where everyone has already given feedback is finished; more
+  // interviewers belong in a new round.
+  const { data: sameRound } = await supabase
+    .from("hr_interviews")
+    .select("state")
+    .eq("candidate_id", candidate_id)
+    .eq("round", round);
+  const liveSameRound = (sameRound ?? []).filter((r) => r.state !== "cancelled");
+  if (liveSameRound.length && liveSameRound.every((r) => r.state === "completed")) {
+    return `Round ${round} is already finished — start the next round instead.`;
+  }
+
   const panel_id = crypto.randomUUID();
   const shared = {
     candidate_id,
     panel_id,
-    round: Number(text(fd, "round") ?? 1) || 1,
+    round,
     scheduled_at: istToIso(text(fd, "scheduled_at")),
     mode: text(fd, "mode"),
     hr_note: text(fd, "hr_note"),
@@ -316,6 +410,10 @@ export async function addPanelInterviewer(_prev: string | null, fd: FormData): P
     .eq("panel_id", panel_id);
   if (!panel?.length) return "Panel not found.";
   if (panel.some((p) => p.interviewer_id === interviewer_id && p.state !== "cancelled")) return "Already on this panel.";
+  const livePanel = panel.filter((p) => p.state !== "cancelled");
+  if (livePanel.length && livePanel.every((p) => p.state === "completed")) {
+    return `Round ${panel[0].round} is already finished — start the next round instead.`;
+  }
 
   const base = panel[0];
   const { error } = await supabase.from("hr_interviews").insert({
@@ -365,7 +463,80 @@ export async function cancelPanel(_prev: string | null, fd: FormData): Promise<s
 
 const RECOMMENDATIONS = ["hire", "reject", "hold", "next_round"];
 
-/** Interviewer feedback. Never touches the candidate's Status — HR decides. */
+function scoresFromForm(fd: FormData): Scores {
+  const out: Record<string, number> = {};
+  for (const skill of SKILLS) {
+    const n = Number(fd.get(`score_${skill.id}`));
+    if (n >= 1 && n <= 5) out[skill.id] = n;
+  }
+  return parseScores(out);
+}
+
+/** Save the evaluation form without submitting it, so an interview can be
+    filled in as it happens and finished later. */
+export async function saveEvaluationDraft(_prev: string | null, fd: FormData): Promise<string | null> {
+  const { supabase, user } = await getHrContext("interviewer");
+  const id = text(fd, "id");
+  if (!id) return "Missing interview.";
+
+  const { data: iv } = await supabase.from("hr_interviews").select("interviewer_id, state").eq("id", id).maybeSingle();
+  if (!iv) return "Interview not found.";
+  if (iv.interviewer_id !== user.id) return "Only the assigned interviewer can fill this in.";
+  if (iv.state === "cancelled") return "This interview was cancelled.";
+
+  const { error } = await supabase
+    .from("hr_interviews")
+    .update({
+      scores: scoresFromForm(fd),
+      feedback: text(fd, "feedback"),
+      rating: Number(text(fd, "rating")) || null,
+      recommendation: text(fd, "recommendation"),
+      draft_saved_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  return error ? error.message : null;
+}
+
+/** Once every interviewer on a round has submitted, move the candidate's
+    status on: cleared puts them on that round's stage, a rejection on the
+    stage that closes it. HR is told either way and can still change it. */
+async function advanceAfterPanel(
+  supabase: Supabase,
+  userId: string,
+  candidateId: string,
+  panelId: string,
+): Promise<void> {
+  const { data: panel } = await supabase
+    .from("hr_interviews")
+    .select("round, state, recommendation")
+    .eq("panel_id", panelId);
+  const live = (panel ?? []).filter((r) => r.state !== "cancelled");
+  if (!live.length || live.some((r) => r.state !== "completed")) return;
+
+  const verdict = panelVerdict(live.map((r) => r.recommendation));
+  const status = nextStatus(await listStages(), live[0].round, verdict);
+  if (!status) return;
+
+  const admin = createAdminClient() as unknown as Supabase;
+  const { data: c } = await admin.from("hr_candidates").select("name, status").eq("id", candidateId).maybeSingle();
+  if (!c || c.status === status) return;
+
+  // The interviewer has no write access to candidates, so this goes through the
+  // service role. A failure here must not lose the feedback that was just given.
+  const err = await applyChange(admin, userId, candidateId, { status });
+  await notify(await hrStaffIds(), {
+    kind: "interview_result",
+    title: err
+      ? `${c.name}: status not updated automatically`
+      : `${c.name} moved to ${status}`,
+    body: err
+      ? `Round ${live[0].round} was ${verdict}. ${err}`
+      : `Round ${live[0].round} ${verdict === "cleared" ? "cleared" : "rejected"} · was ${c.status ?? "no status"}`,
+    link: `/hr/candidates/${candidateId}`,
+  });
+}
+
+/** Interviewer feedback. The candidate's status follows the panel's verdict. */
 export async function submitFeedback(_prev: string | null, fd: FormData): Promise<string | null> {
   const { supabase, user } = await getHrContext("interviewer");
   const id = text(fd, "id");
@@ -379,7 +550,7 @@ export async function submitFeedback(_prev: string | null, fd: FormData): Promis
 
   const { data: iv } = await supabase
     .from("hr_interviews")
-    .select("id, interviewer_id, candidate_id, state")
+    .select("id, interviewer_id, candidate_id, state, panel_id, round")
     .eq("id", id)
     .maybeSingle();
   if (!iv) return "Interview not found.";
@@ -388,9 +559,20 @@ export async function submitFeedback(_prev: string | null, fd: FormData): Promis
 
   const { error } = await supabase
     .from("hr_interviews")
-    .update({ feedback, recommendation, rating, state: "completed", completed_at: new Date().toISOString() })
+    .update({
+      feedback,
+      recommendation,
+      rating,
+      scores: scoresFromForm(fd),
+      state: "completed",
+      completed_at: new Date().toISOString(),
+    })
     .eq("id", id);
   if (error) return error.message;
+
+  await advanceAfterPanel(supabase, user.id, iv.candidate_id, iv.panel_id).catch((e) =>
+    console.error("status not advanced:", errMsg(e)),
+  );
 
   revalidateHr(iv.candidate_id);
   return null;
@@ -402,7 +584,8 @@ export async function createOpening(_prev: string | null, fd: FormData): Promise
   const { supabase, user, access } = await getHrContext("any");
   if (!access.planning) return "Only planning users can raise openings.";
 
-  const designation = text(fd, "designation");
+  const chosen = text(fd, "designation");
+  const designation = chosen === "__other" ? text(fd, "designation_other") : chosen;
   const headcount = Number(text(fd, "headcount") ?? 1);
   if (!designation) return "Designation is required.";
   if (!(headcount >= 1)) return "Headcount must be at least 1.";

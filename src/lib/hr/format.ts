@@ -48,6 +48,23 @@ export const OPENING_STATUS_TONE: Record<string, BadgeTone> = {
   cancelled: "neutral",
 };
 
+export const fmtDay = (day: string | null) =>
+  day ? new Date(`${day}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+/** How the joining day compares with the date planning asked for. */
+export function joiningNote(
+  joinedOn: string | null,
+  requiredBy: string | null,
+): { text: string; tone: BadgeTone } | null {
+  if (!joinedOn) return null;
+  if (!requiredBy) return { text: `Joined ${fmtDay(joinedOn)}`, tone: "good" };
+  const days = Math.round((new Date(joinedOn).getTime() - new Date(requiredBy).getTime()) / 86_400_000);
+  if (days === 0) return { text: `Joined ${fmtDay(joinedOn)} — on the date needed`, tone: "good" };
+  return days < 0
+    ? { text: `Joined ${fmtDay(joinedOn)} — ${-days} day${days === -1 ? "" : "s"} before needed`, tone: "good" }
+    : { text: `Joined ${fmtDay(joinedOn)} — ${days} day${days === 1 ? "" : "s"} late`, tone: "warn" };
+}
+
 /** Whole days since an ISO timestamp. */
 export function daysSince(iso: string): number {
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);

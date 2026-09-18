@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { after } from "next/server";
-import { Card, CardLabel } from "@/components/ui/Card";
+import { Card } from "@/components/ui/Card";
 import { Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { TD, TH, TRow, Table } from "@/components/ui/Table";
 import { getHrContext } from "@/lib/hr/auth";
-import { getOpenOpenings, getStages } from "@/lib/hr/data";
+import { getDesignations, getOpenOpenings, getStages } from "@/lib/hr/data";
 import { fmtAgo } from "@/lib/hr/format";
 import { getConnection, isExcelReady, syncIfStale } from "@/lib/hr/sync";
-import { InlineStatusSelect, QuickAddForm, SyncButton } from "./HrForms";
+import { InlineStatusSelect, QuickAddPanel, SyncButton } from "./HrForms";
 
 const PAGE_SIZE = 50;
 
@@ -39,10 +39,11 @@ export default async function CandidatesPage({ searchParams }: { searchParams: P
   else if (sp.status) query = query.eq("status", sp.status);
   if (sp.opening) query = query.eq("opening_code", sp.opening);
 
-  const [{ data, count }, stages, openings, conn] = await Promise.all([
+  const [{ data, count }, stages, openings, designations, conn] = await Promise.all([
     query,
     getStages(),
     getOpenOpenings(),
+    getDesignations(),
     getConnection(),
   ]);
   const rows = data ?? [];
@@ -64,7 +65,7 @@ export default async function CandidatesPage({ searchParams }: { searchParams: P
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Candidates"
+        title={`Candidates · ${total.toLocaleString("en-IN")}`}
         subtitle={
           excel ? (
             <>
@@ -98,34 +99,35 @@ export default async function CandidatesPage({ searchParams }: { searchParams: P
         }
       />
 
-      <Card className="space-y-3">
-        <CardLabel>Quick add</CardLabel>
-        <QuickAddForm stages={stageNames} openings={openings} defaultStatus={firstActive} />
-      </Card>
-
-      <form method="get" className="flex flex-wrap items-end gap-3">
-        <Input name="q" defaultValue={sp.q ?? ""} placeholder="Search name, phone, ID, post" className="w-72" />
-        <Select name="status" defaultValue={sp.status ?? ""}>
-          <option value="">All statuses</option>
-          {stages.map((s) => (
-            <option key={s.name}>{s.name}</option>
-          ))}
-          <option value="__none">No status</option>
-        </Select>
-        <Select name="opening" defaultValue={sp.opening ?? ""}>
-          <option value="">All openings</option>
-          {openings.map((o) => (
-            <option key={o.code} value={o.code}>
-              {o.code} · {o.designation}
-            </option>
-          ))}
-        </Select>
-        <button className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-strong">Apply</button>
-        <Link href="/hr" className="px-2 py-2 text-sm text-ink-2 hover:underline">
-          Reset
-        </Link>
-        <span className="ml-auto text-sm text-ink-2">{total.toLocaleString("en-IN")} candidates</span>
-      </form>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <form method="get" className="flex flex-wrap items-end gap-2">
+          <Input name="q" defaultValue={sp.q ?? ""} placeholder="Search name, phone, ID, post" className="w-64" />
+          <Select name="status" defaultValue={sp.status ?? ""}>
+            <option value="">All statuses</option>
+            {stages.map((s) => (
+              <option key={s.name}>{s.name}</option>
+            ))}
+            <option value="__none">No status</option>
+          </Select>
+          <Select name="opening" defaultValue={sp.opening ?? ""}>
+            <option value="">All openings</option>
+            {openings.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.code} · {o.designation}
+              </option>
+            ))}
+          </Select>
+          <button className="rounded-md border border-line-strong px-3 py-2 text-sm font-medium text-ink hover:bg-surface-2">
+            Apply
+          </button>
+          {(sp.q || sp.status || sp.opening) && (
+            <Link href="/hr" className="px-2 py-2 text-sm text-ink-2 hover:underline">
+              Clear
+            </Link>
+          )}
+        </form>
+        <QuickAddPanel stages={stageNames} openings={openings} designations={designations} defaultStatus={firstActive} />
+      </div>
 
       <Card className="overflow-x-auto p-0">
         {rows.length === 0 ? (
@@ -134,15 +136,11 @@ export default async function CandidatesPage({ searchParams }: { searchParams: P
           <Table>
             <thead>
               <tr>
-                <TH>ID</TH>
-                <TH>Date</TH>
-                <TH>Name</TH>
+                <TH>Candidate</TH>
                 <TH>Designation</TH>
                 <TH>Phone</TH>
-                <TH>Exp.</TH>
-                <TH>Current</TH>
-                <TH>Expected</TH>
-                <TH>Opening</TH>
+                <TH className="text-right">Exp.</TH>
+                <TH className="text-right">Salary now → expected</TH>
                 <TH>Status</TH>
                 <TH> </TH>
               </tr>
@@ -150,25 +148,28 @@ export default async function CandidatesPage({ searchParams }: { searchParams: P
             <tbody>
               {rows.map((r) => (
                 <TRow key={r.id}>
-                  <TD className="whitespace-nowrap font-mono text-xs text-ink-2">{r.candidate_code}</TD>
-                  <TD className="whitespace-nowrap text-xs text-ink-2">{r.entry_date ?? "—"}</TD>
-                  <TD>
+                  <TD className="align-top">
                     <Link href={`/hr/candidates/${r.id}`} className="font-medium text-accent hover:underline">
                       {r.name}
                     </Link>
+                    <p className="font-mono text-[11px] text-ink-3">
+                      {r.candidate_code}
+                      {r.entry_date ? ` · ${r.entry_date}` : ""}
+                      {r.opening_code ? ` · ${r.opening_code}` : ""}
+                    </p>
                   </TD>
-                  <TD className="text-ink-2">{r.designation ?? "—"}</TD>
-                  <TD className="whitespace-nowrap text-ink-2">{r.phone ?? "—"}</TD>
-                  <TD className="text-ink-2">{r.experience_years ?? "—"}</TD>
-                  <TD className="whitespace-nowrap text-ink-2">{r.current_salary ?? "—"}</TD>
-                  <TD className="whitespace-nowrap text-ink-2">{r.expected_salary ?? "—"}</TD>
-                  <TD className="whitespace-nowrap font-mono text-xs text-ink-2">{r.opening_code ?? "—"}</TD>
-                  <TD>
+                  <TD className="align-top text-ink-2">{r.designation ?? "—"}</TD>
+                  <TD className="whitespace-nowrap align-top text-ink-2">{r.phone ?? "—"}</TD>
+                  <TD className="whitespace-nowrap align-top text-right tabular-nums text-ink-2">{r.experience_years ?? "—"}</TD>
+                  <TD className="whitespace-nowrap align-top text-right tabular-nums text-ink-2">
+                    {r.current_salary ?? "—"} <span className="text-ink-3">→</span> {r.expected_salary ?? "—"}
+                  </TD>
+                  <TD className="align-top">
                     <InlineStatusSelect key={r.status ?? ""} id={r.id} status={r.status} stages={stageNames} />
                   </TD>
-                  <TD className="whitespace-nowrap">
-                    <Link href={`/hr/status?candidate=${r.id}`} className="text-xs font-medium text-accent hover:underline">
-                      Show status
+                  <TD className="whitespace-nowrap align-top">
+                    <Link href={`/hr/candidates/${r.id}`} className="text-xs font-medium text-accent hover:underline">
+                      Open →
                     </Link>
                   </TD>
                 </TRow>

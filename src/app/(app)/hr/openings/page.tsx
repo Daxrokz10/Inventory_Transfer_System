@@ -16,7 +16,7 @@ const PRIORITY_TONE: Record<string, BadgeTone> = { low: "neutral", normal: "neut
 export default async function OpeningsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const { supabase, access, user } = await getHrContext("planning");
   const sp = await searchParams;
-  const status = sp.status ?? "active";
+  const status = sp.status ?? "all";
 
   // RLS: HR staff see every opening, planning users only their own.
   let query = supabase
@@ -83,12 +83,12 @@ export default async function OpeningsPage({ searchParams }: { searchParams: Pro
 
       <form method="get" className="flex items-end gap-3">
         <Select name="status" defaultValue={status}>
+          <option value="all">All openings</option>
           <option value="active">Open & in progress</option>
           <option value="open">Open</option>
           <option value="in_progress">In progress</option>
           <option value="filled">Filled</option>
           <option value="cancelled">Cancelled</option>
-          <option value="all">All</option>
         </Select>
         <button className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-strong">Apply</button>
       </form>

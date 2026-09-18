@@ -4,9 +4,11 @@ import { Badge } from "@/components/ui/Badge";
 import { Card, CardLabel } from "@/components/ui/Card";
 import { getHrContext } from "@/lib/hr/auth";
 import { OPENING_STATUS_LABEL, PRIORITY_LABEL, getStages } from "@/lib/hr/data";
-import { OPENING_STATUS_TONE as STATUS_TONE, statusTone } from "@/lib/hr/format";
+import { OPENING_STATUS_TONE as STATUS_TONE, joiningNote, statusTone } from "@/lib/hr/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OpeningStatusForm, TagCandidateForm } from "../../HrForms";
+import { Timeline } from "../../Timeline";
+import { buildTimelines, type CandidateRow } from "@/lib/hr/progress";
 
 export default async function OpeningPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -36,7 +38,7 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
     access.hrStaff
       ? supabase
           .from("hr_candidates")
-          .select("id, candidate_code, name, designation, status")
+          .select("id, candidate_code, name, designation, status, joined_on")
           .eq("opening_id", id)
           .order("updated_at", { ascending: false })
           .limit(500)
@@ -48,6 +50,24 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
   const kindOf = new Map(stages.map((s) => [s.name, s.kind]));
   const byStage = [...(counts ?? [])].sort((a, b) => (order.get(a.status ?? "") ?? 999) - (order.get(b.status ?? "") ?? 999));
   const filled = byStage.filter((c) => c.status && kindOf.get(c.status) === "success").reduce((s, c) => s + c.n, 0);
+
+  // Whoever actually joined against this requirement. Their journey belongs
+  // here, in full — the status board keeps only the one-line version.
+  const joined = candidates.find((c) => c.joined_on);
+  const joinedNote = joined ? joiningNote(joined.joined_on, opening.required_by) : null;
+  const joinedTimeline = joined
+    ? (
+        await buildTimelines(
+          ((
+            await supabase
+              .from("hr_candidates")
+              .select("id, candidate_code, name, designation, status, entry_date, created_at, opening_id, joined_on")
+              .eq("id", joined.id)
+          ).data ?? []) as CandidateRow[],
+          [{ ...opening, raised_by: opening.raised_by }],
+        )
+      ).get(joined.id) ?? []
+    : [];
 
   const facts: [string, string | null][] = [
     ["Site", opening.project ? `${opening.project.code} — ${opening.project.name}` : null],
@@ -74,6 +94,15 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
             <Badge tone={STATUS_TONE[opening.status]}>{OPENING_STATUS_LABEL[opening.status]}</Badge>
             {filled}/{opening.headcount} filled
           </p>
+          {joined && (
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+              <Link href={`/hr/candidates/${joined.id}`} className="font-medium text-accent hover:underline">
+                {joined.name}
+              </Link>
+              <span className="text-ink-2">joined</span>
+              {joinedNote && <Badge tone={joinedNote.tone}>{joinedNote.text}</Badge>}
+            </p>
+          )}
         </div>
         {access.hrStaff && <OpeningStatusForm id={opening.id} status={opening.status} />}
       </div>
@@ -118,6 +147,27 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
           </Card>
         )}
       </div>
+
+      {access.hrStaff && joined && joinedTimeline.length > 0 && (
+        <Card className="p-0">
+          <details open className="group">
+            <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-5 py-3 text-sm">
+              <span>
+                <span className="font-semibold text-ink">{joined.name} joined</span>
+                <span className="ml-2 text-ink-2">the whole journey, from requirement to joining</span>
+              </span>
+              <span className="flex items-center gap-2">
+                {joinedNote && <Badge tone={joinedNote.tone}>{joinedNote.text}</Badge>}
+                <span className="text-xs text-accent group-open:hidden">show</span>
+                <span className="hidden text-xs text-accent group-open:inline">hide</span>
+              </span>
+            </summary>
+            <div className="border-t border-line px-5 py-4">
+              <Timeline events={joinedTimeline} />
+            </div>
+          </details>
+        </Card>
+      )}
 
       {access.hrStaff && (
         <Card className="space-y-3">
