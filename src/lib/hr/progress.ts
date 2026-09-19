@@ -23,11 +23,14 @@ type Opening = { id: string; code: string; designation: string; headcount: numbe
 export async function buildTimelines(
   candidates: CandidateRow[],
   openings: Opening[] = [],
+  // Planning users can't read candidates' history under RLS; the opening page
+  // passes the service-role client for them, after checking the opening is theirs.
+  client?: Awaited<ReturnType<typeof createClient>>,
 ): Promise<Map<string, TimelineEvent[]>> {
   const out = new Map<string, TimelineEvent[]>();
   if (candidates.length === 0) return out;
 
-  const supabase = await createClient();
+  const supabase = client ?? (await createClient());
   const ids = candidates.map((c) => c.id);
   const [{ data: history }, { data: interviews }, people] = await Promise.all([
     supabase

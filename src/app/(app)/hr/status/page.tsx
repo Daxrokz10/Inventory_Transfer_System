@@ -6,8 +6,9 @@ import { Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { cn } from "@/lib/cn";
 import { getHrContext } from "@/lib/hr/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { OPENING_STATUS_LABEL, getStages } from "@/lib/hr/data";
-import { OPENING_STATUS_TONE, joiningNote, statusTone } from "@/lib/hr/format";
+import { OPENING_STATUS_TONE, daysAgoIso, joiningNote, statusTone } from "@/lib/hr/format";
 import { buildTimelines, type CandidateRow } from "@/lib/hr/progress";
 import { syncIfStale } from "@/lib/hr/sync";
 import { TimelineStrip } from "../Timeline";
@@ -18,6 +19,7 @@ import { ScrollToCard } from "./ScrollToCard";
    Candidates HR added without an opening get a section of their own. */
 
 const PER_GROUP = 25;
+const RECENT_DAYS = 60;
 
 type Search = { candidate?: string; opening?: string; q?: string; show?: string };
 
@@ -30,13 +32,19 @@ type OpeningRow = {
   headcount: number;
   status: string;
   required_by: string | null;
+  filled_at?: string | null;
   created_at: string;
   raised_by: string | null;
   project: { code: string; name: string } | null;
 };
 
 export default async function StatusPage({ searchParams }: { searchParams: Promise<Search> }) {
-  const { supabase } = await getHrContext("staff");
+  const { supabase, access, user } = await getHrContext("planning");
+  const isHr = access.hrStaff;
+  // Planning sees the board for the openings they raised, read-only. They can't
+  // read candidates under RLS, so those reads go through the service role and
+  // are limited to their own openings below.
+  const db = isHr ? supabase : (createAdminClient() as unknown as typeof supabase);
   const sp = await searchParams;
   after(() => syncIfStale());
 
@@ -48,11 +56,11 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
     getStages(),
     supabase
       .from("hr_openings")
-      .select("id, code, designation, headcount, status, required_by, created_at, raised_by, project:project_id(code, name)")
+      .select("id, code, designation, headcount, status, required_by, filled_at, created_at, raised_by, project:project_id(code, name)")
       .order("created_at", { ascending: false })
       .limit(100),
     sp.candidate
-      ? supabase
+      ? db
           .from("hr_candidates")
           .select(CANDIDATE_COLUMNS)
           .eq("id", sp.candidate)
@@ -61,19 +69,24 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
       : Promise.resolve(null),
   ]);
 
-  const allOpenings = (openingRows ?? []) as unknown as OpeningRow[];
-  // The board is about hiring still under way: filled and cancelled openings
-  // live on the Openings page, with their full timelines. Picking one in the
-  // filter still shows it.
-  const openings = allOpenings.filter((o) =>
-    sp.opening ? o.code === sp.opening : o.status === "open" || o.status === "in_progress",
-  );
+  const allOpenings = ((openingRows ?? []) as unknown as OpeningRow[]).filter((o) => isHr || o.raised_by === user.id);
+  // The board is about hiring still under way, plus openings filled in the
+  // last two months so a recent hire doesn't vanish the day they join. Older
+  // and cancelled ones live on the Openings page. Picking one in the filter
+  // still shows it.
+  const recentSince = daysAgoIso(RECENT_DAYS);
+  const isLive = (o: OpeningRow) => o.status === "open" || o.status === "in_progress" || o.status === "accepted";
+  const isRecentlyFilled = (o: OpeningRow) => o.status === "filled" && (!o.filled_at || o.filled_at >= recentSince);
+  const openings = allOpenings
+    .filter((o) => (sp.opening ? o.code === sp.opening : isLive(o) || isRecentlyFilled(o)))
+    // completed ones most recently filled first
+    .sort((a, b) => (b.filled_at ?? "").localeCompare(a.filled_at ?? ""));
   const finishedStages = stages.filter((s) => s.kind === "success" || s.kind === "closed").map((s) => s.name);
   const closedStages = stages.filter((s) => s.kind === "closed").map((s) => s.name);
   const inList = (names: string[]) => `(${names.map((n) => `"${n}"`).join(",")})`;
 
   const fetchGroup = async (openingId: string | null) => {
-    let query = supabase
+    let query = db
       .from("hr_candidates")
       .select(CANDIDATE_COLUMNS, { count: "exact" })
       .order("updated_at", { ascending: false })
@@ -90,15 +103,20 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
     return { rows: (data ?? []) as CandidateRow[], total: count ?? 0 };
   };
 
+  // Order on the page: openings still hiring, candidates with no opening,
+  // then the openings completed recently.
   const groups: { opening: OpeningRow | null; rows: CandidateRow[]; total: number }[] = [];
-  for (const o of openings) groups.push({ opening: o, ...(await fetchGroup(o.id)) });
-  if (!sp.opening) {
+  for (const o of openings.filter(isLive)) groups.push({ opening: o, ...(await fetchGroup(o.id)) });
+  // Candidates with no opening are HR's pool; planning only sees their own openings.
+  if (!sp.opening && isHr) {
     const loose = await fetchGroup(null);
     if (loose.total > 0) groups.push({ opening: null, ...loose });
   }
+  for (const o of openings.filter((x) => !isLive(x))) groups.push({ opening: o, ...(await fetchGroup(o.id)) });
+  const firstCompleted = groups.findIndex((g) => g.opening && !isLive(g.opening));
 
   // The candidate jumped to from "Show status" is always shown.
-  if (focus) {
+  if (focus && (isHr || allOpenings.some((o) => o.id === focus.opening_id))) {
     const g = groups.find((x) => (x.opening?.id ?? null) === focus.opening_id);
     if (g && !g.rows.some((r) => r.id === focus.id)) g.rows.unshift(focus);
     else if (!g) groups.unshift({ opening: null, rows: [focus], total: 1 });
@@ -108,7 +126,7 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
   // filter says — that is the row the opening was raised for.
   const openingIds = openings.map((o) => o.id);
   const { data: joinedRows } = openingIds.length
-    ? await supabase.from("hr_candidates").select(CANDIDATE_COLUMNS).in("opening_id", openingIds).not("joined_on", "is", null)
+    ? await db.from("hr_candidates").select(CANDIDATE_COLUMNS).in("opening_id", openingIds).not("joined_on", "is", null)
     : { data: [] as CandidateRow[] };
   const joinedBy = new Map<string, CandidateRow[]>();
   for (const r of (joinedRows ?? []) as CandidateRow[]) {
@@ -118,17 +136,34 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
   const timelines = await buildTimelines(
     [...groups.flatMap((g) => g.rows), ...[...joinedBy.values()].flat()],
     allOpenings,
+    isHr ? undefined : db,
   );
+
+  // Only HR can open a candidate; planning sees the name.
+  const candidateName = (c: CandidateRow, className: string) =>
+    isHr ? (
+      <Link href={`/hr/candidates/${c.id}`} className={`${className} text-accent hover:underline`}>
+        {c.name}
+      </Link>
+    ) : (
+      <span className={`${className} text-ink`}>{c.name}</span>
+    );
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Status"
-        subtitle="Openings still being hired for, and how far each candidate has got."
+        subtitle={
+          isHr
+            ? "Openings still being hired for, and how far each candidate has got."
+            : "The openings you raised, and how far each candidate has got."
+        }
         actions={
-          <Link href="/hr/settings#stages" className="text-sm font-medium text-accent hover:underline">
-            Order stages
-          </Link>
+          isHr ? (
+            <Link href="/hr/settings#stages" className="text-sm font-medium text-accent hover:underline">
+              Order stages
+            </Link>
+          ) : undefined
         }
       />
 
@@ -167,12 +202,19 @@ No openings are being hired for right now. Planning raises them from the Opening
         </Card>
       )}
 
-      {groups.map((g) => {
+      {groups.map((g, gi) => {
         const joiners = (g.opening ? joinedBy.get(g.opening.id) : undefined) ?? [];
         const joinedIds = new Set(joiners.map((j) => j.id));
         const rest = g.rows.filter((c) => !joinedIds.has(c.id));
         return (
-        <Card key={g.opening?.id ?? "none"} className="p-0">
+        <div key={g.opening?.id ?? "none"} className="space-y-3">
+        {gi === firstCompleted && (
+          <div className="pt-3">
+            <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-ink-3">Completed in the last 2 months</h2>
+            <p className="text-xs text-ink-3">Filled openings stay here for {RECENT_DAYS} days, then move to the Openings page.</p>
+          </div>
+        )}
+        <Card className="p-0">
           <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-3">
             {g.opening ? (
               <div>
@@ -218,9 +260,7 @@ No openings are being hired for right now. Planning raises them from the Opening
             <section key={joined.id} id={`cand-${joined.id}`} className="border-b border-line bg-good-soft/40 px-5 py-4">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <p className="text-sm">
-                  <Link href={`/hr/candidates/${joined.id}`} className="font-semibold text-accent hover:underline">
-                    {joined.name}
-                  </Link>
+                  {candidateName(joined, "font-semibold")}
                   <span className="ml-2 text-ink-2">{joined.designation ?? "—"}</span>
                   <span className="ml-2 font-mono text-[11px] text-ink-3">{joined.candidate_code}</span>
                 </p>
@@ -251,9 +291,7 @@ No openings are being hired for right now. Planning raises them from the Opening
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-sm">
-                    <Link href={`/hr/candidates/${c.id}`} className="font-medium text-accent hover:underline">
-                      {c.name}
-                    </Link>
+                    {candidateName(c, "font-medium")}
                     <span className="ml-2 text-ink-2">{c.designation ?? "—"}</span>
                     <span className="ml-2 font-mono text-[11px] text-ink-3">{c.candidate_code}</span>
                   </p>
@@ -267,14 +305,17 @@ No openings are being hired for right now. Planning raises them from the Opening
           {g.rows.length < g.total && (
             <div className="border-t border-line px-5 py-2.5">
               <Link
-                href={g.opening ? `/hr?opening=${g.opening.code}` : "/hr"}
+                href={
+                  !isHr && g.opening ? `/hr/openings/${g.opening.id}` : g.opening ? `/hr?opening=${g.opening.code}` : "/hr"
+                }
                 className="text-xs font-medium text-accent hover:underline"
               >
-                See all {g.total.toLocaleString("en-IN")} in the candidate list →
+                See all {g.total.toLocaleString("en-IN")} {isHr ? "in the candidate list" : "on the opening"} →
               </Link>
             </div>
           )}
         </Card>
+        </div>
         );
       })}
 

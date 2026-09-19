@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardLabel } from "@/components/ui/Card";
 import { getHrContext } from "@/lib/hr/auth";
-import { OPENING_STATUS_LABEL, PRIORITY_LABEL, getStages } from "@/lib/hr/data";
+import { OPENING_STATUS_LABEL, PRIORITY_LABEL, getStages, joiningStages } from "@/lib/hr/data";
 import { OPENING_STATUS_TONE as STATUS_TONE, joiningNote, statusTone } from "@/lib/hr/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OpeningStatusForm, TagCandidateForm } from "../../HrForms";
@@ -13,8 +13,11 @@ import { buildTimelines, type CandidateRow } from "@/lib/hr/progress";
 export default async function OpeningPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { supabase, access, user } = await getHrContext("openings");
+  const admin = createAdminClient();
 
-  const { data: o } = await supabase
+  // Interviewers have no read policy on openings; they only look, so they read
+  // through the service role. HR and planning read under their own RLS.
+  const { data: o } = await (access.hrStaff || access.planning ? supabase : admin)
     .from("hr_openings")
     .select("id, code, designation, headcount, required_by, experience, salary_range, description, priority, status, acknowledged_at, raised_by, created_at, project:project_id(code, name)")
     .eq("id", id)
@@ -22,8 +25,11 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
   if (!o) notFound();
   const opening = o as unknown as typeof o & { project: { code: string; name: string } | null };
   if (!access.hrStaff && !access.interviewer && opening.raised_by !== user.id) notFound();
-
-  const admin = createAdminClient();
+  // HR, and the planning user who raised it, follow the hiring in full.
+  const canSeeProgress = access.hrStaff || opening.raised_by === user.id;
+  // Planning can't read candidates under RLS; for their own opening they read
+  // through the service role, and only the rows tagged to it.
+  const progressClient = access.hrStaff ? supabase : (admin as unknown as typeof supabase);
   // First time HR opens it, it stops showing as "New".
   if (access.hrStaff && !opening.acknowledged_at) {
     await admin.from("hr_openings").update({ acknowledged_at: new Date().toISOString() }).eq("id", id);
@@ -35,8 +41,8 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
     opening.raised_by
       ? admin.from("profiles").select("full_name").eq("id", opening.raised_by).maybeSingle()
       : Promise.resolve({ data: null }),
-    access.hrStaff
-      ? supabase
+    canSeeProgress
+      ? progressClient
           .from("hr_candidates")
           .select("id, candidate_code, name, designation, status, entry_date, created_at, opening_id, joined_on")
           .eq("opening_id", id)
@@ -49,15 +55,23 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
   const order = new Map(stages.map((s, i) => [s.name, i]));
   const kindOf = new Map(stages.map((s) => [s.name, s.kind]));
   const byStage = [...(counts ?? [])].sort((a, b) => (order.get(a.status ?? "") ?? 999) - (order.get(b.status ?? "") ?? 999));
-  const filled = byStage.filter((c) => c.status && kindOf.get(c.status) === "success").reduce((s, c) => s + c.n, 0);
+  const { joined: joinedStage } = joiningStages(stages);
+  const joinedN = byStage.filter((c) => c.status === joinedStage).reduce((s, c) => s + c.n, 0);
+  const acceptedN = byStage
+    .filter((c) => c.status && kindOf.get(c.status) === "success" && c.status !== joinedStage)
+    .reduce((s, c) => s + c.n, 0);
 
   // Whoever actually joined against this requirement. Their journey belongs
   // here, in full — the status board keeps only the one-line version.
   const joiners = candidates.filter((c) => c.joined_on).sort((a, b) => (a.joined_on ?? "").localeCompare(b.joined_on ?? ""));
-  const stillNeeded = Math.max(0, Math.max(1, opening.headcount) - joiners.length);
+  const stillNeeded = Math.max(0, Math.max(1, opening.headcount) - joinedN);
   // Every tagged candidate's journey lives here — this is the page that tells
   // the whole story of the requirement.
-  const timelines = await buildTimelines(candidates, [{ ...opening, raised_by: opening.raised_by }]);
+  const timelines = await buildTimelines(
+    candidates,
+    [{ ...opening, raised_by: opening.raised_by }],
+    access.hrStaff ? undefined : progressClient,
+  );
 
   const facts: [string, string | null][] = [
     ["Site", opening.project ? `${opening.project.code} — ${opening.project.name}` : null],
@@ -82,14 +96,10 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
           <h1 className="text-2xl font-semibold tracking-tight text-ink">{opening.designation}</h1>
           <p className="mt-1 flex items-center gap-2 text-sm text-ink-2">
             <Badge tone={STATUS_TONE[opening.status]}>{OPENING_STATUS_LABEL[opening.status]}</Badge>
-            {filled}/{opening.headcount} filled
+            {joinedN}/{opening.headcount} joined
+            {acceptedN > 0 && ` · ${acceptedN} offer${acceptedN === 1 ? "" : "s"} accepted, not yet joined`}
+            {joinedN > 0 && stillNeeded > 0 && ` · ${stillNeeded} still to join`}
           </p>
-          {joiners.length > 0 && (
-            <p className="mt-2 text-sm text-ink-2">
-              {joiners.length} of {opening.headcount} joined
-              {stillNeeded > 0 ? ` · ${stillNeeded} still needed` : ""}
-            </p>
-          )}
         </div>
         {access.hrStaff && <OpeningStatusForm id={opening.id} status={opening.status} />}
       </div>
@@ -135,7 +145,7 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
         )}
       </div>
 
-      {access.hrStaff &&
+      {canSeeProgress &&
         joiners.map((j) => {
           const note = joiningNote(j.joined_on ?? null, opening.required_by);
           return (
@@ -160,7 +170,7 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
           );
         })}
 
-      {access.hrStaff && (
+      {canSeeProgress && (
         <Card className="space-y-3">
           <div className="flex items-center justify-between">
             <CardLabel>Tagged candidates · {candidates.length}</CardLabel>

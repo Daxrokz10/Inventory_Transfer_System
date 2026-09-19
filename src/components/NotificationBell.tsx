@@ -17,6 +17,27 @@ type Item = {
 
 const POLL_MS = 30_000;
 
+/* A desktop (OS) notification. Only while you're away from the tab — when
+   you're looking at the app, the bell is enough. The tag stops two open tabs
+   from popping the same one twice. */
+function showDesktop(n: Item, onClick: () => void) {
+  if (document.visibilityState === "visible" && document.hasFocus()) return;
+  try {
+    const popup = new Notification(n.title, {
+      body: n.body ?? undefined,
+      tag: `sgc-notification-${n.id}`,
+      icon: "/sgc-logo.png",
+    });
+    popup.onclick = () => {
+      window.focus();
+      popup.close();
+      onClick();
+    };
+  } catch {
+    // some browsers (Android Chrome) only allow notifications from a service worker
+  }
+}
+
 function ago(iso: string, now: number): string {
   const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
   if (s < 60) return "just now";
@@ -27,7 +48,8 @@ function ago(iso: string, now: number): string {
 
 /** Sidebar bell. Polls every 30 s (and when the tab regains focus), shows the
     unread count, and lists recent notifications; clicking one marks it read
-    and opens its page. */
+    and opens its page. Once allowed, new ones also appear as desktop
+    notifications while the app is open in another tab or minimised. */
 export function NotificationBell() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -36,15 +58,35 @@ export function NotificationBell() {
   const [now, setNow] = useState(0);
   const lastUnread = useRef<number | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  // Ids already seen by this tab, so only notifications that arrive while the
+  // app is open pop up on the desktop — not the backlog on first load.
+  const seen = useRef<Set<number> | null>(null);
+  const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
 
   const load = useCallback(async () => {
     try {
+      const supported = typeof window !== "undefined" && "Notification" in window;
+      setPermission(supported ? Notification.permission : "unsupported");
       const res = await fetch("/api/notifications", { cache: "no-store" });
       if (!res.ok) return;
       const json = (await res.json()) as { unread: number; items: Item[] };
       setUnread(json.unread);
       setItems(json.items);
       setNow(Date.now());
+      if (seen.current === null) {
+        seen.current = new Set(json.items.map((n) => n.id));
+      } else {
+        const fresh = json.items.filter((n) => !n.read_at && !seen.current!.has(n.id));
+        fresh.forEach((n) => seen.current!.add(n.id));
+        if (supported && Notification.permission === "granted") {
+          fresh.reverse().forEach((n) =>
+            showDesktop(n, () => {
+              void markNotificationsRead(n.id).then(() => setUnread((u) => Math.max(0, u - 1)));
+              if (n.link) router.push(n.link);
+            }),
+          );
+        }
+      }
       // A new one arrived while the tab is open: flag it in the tab title.
       if (lastUnread.current !== null && json.unread > lastUnread.current && document.hidden) {
         document.title = `(${json.unread}) ${document.title.replace(/^\(\d+\) /, "")}`;
@@ -53,7 +95,7 @@ export function NotificationBell() {
     } catch {
       // offline / signed out: try again next tick
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     // Deferred so the first fetch isn't a synchronous setState inside the effect.
@@ -84,6 +126,11 @@ export function NotificationBell() {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  const enableDesktop = async () => {
+    if (!("Notification" in window)) return;
+    setPermission(await Notification.requestPermission());
+  };
 
   const openItem = async (n: Item) => {
     setOpen(false);
@@ -133,6 +180,24 @@ export function NotificationBell() {
               </button>
             )}
           </div>
+          {permission === "default" && (
+            <div className="flex items-center justify-between gap-3 border-b border-line bg-accent-soft/40 px-4 py-2.5">
+              <p className="text-xs text-ink-2">Get a desktop alert when something new comes in while you&apos;re in another tab.</p>
+              <button
+                type="button"
+                onClick={enableDesktop}
+                className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-xs font-medium text-white hover:bg-accent-strong"
+              >
+                Turn on
+              </button>
+            </div>
+          )}
+          {permission === "denied" && (
+            <p className="border-b border-line px-4 py-2 text-xs text-ink-3">
+              Desktop alerts are blocked for this site. Allow notifications in the browser&apos;s site settings (the icon left of
+              the address) to turn them on.
+            </p>
+          )}
           <ul className="max-h-[70vh] divide-y divide-line overflow-y-auto">
             {items.length === 0 && <li className="px-4 py-6 text-center text-sm text-ink-2">No notifications yet.</li>}
             {items.map((n) => (

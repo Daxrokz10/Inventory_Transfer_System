@@ -37,7 +37,7 @@ const blockEnter = (e: React.KeyboardEvent<HTMLFormElement>) => {
   if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") e.preventDefault();
 };
 
-export type OpeningOption = { code: string; designation: string };
+export type OpeningOption = { code: string; designation: string; site?: string | null };
 export type PersonOption = { id: string; label: string };
 
 /* ---------------- candidates ---------------- */
@@ -118,7 +118,8 @@ export function QuickAddForm({
             <option value="">None</option>
             {openings.map((o) => (
               <option key={o.code} value={o.code}>
-                {o.code} · {o.designation}
+                {o.code}
+                {o.site ? ` · ${o.site}` : ""} · {o.designation}
               </option>
             ))}
           </Select>
@@ -213,7 +214,41 @@ export function EditCandidateForm({ c }: { c: CandidateFormValues }) {
   );
 }
 
-export function StatusForm({ id, status, stages }: { id: string; status: string | null; stages: string[] }) {
+/** Which statuses ask for a date: Joined needs one, an accepted offer takes
+    the expected joining day if HR knows it. */
+export type JoiningStages = { joined: string | null; accepted: string[] };
+
+function JoiningDate({ status, stages, defaultDate }: { status: string; stages?: JoiningStages; defaultDate?: string | null }) {
+  if (!stages || !status) return null;
+  const isJoined = status === stages.joined;
+  if (!isJoined && !stages.accepted.includes(status)) return null;
+  return (
+    <label className="flex items-center gap-1.5 text-xs text-ink-2">
+      {isJoined ? "Joined on *" : "Expected joining"}
+      <Input
+        name="joining_date"
+        type="date"
+        required={isJoined}
+        defaultValue={isoDay(defaultDate ?? null)}
+        className="w-auto py-1 text-xs"
+      />
+    </label>
+  );
+}
+
+export function StatusForm({
+  id,
+  status,
+  stages,
+  joining,
+  dateOfJoining,
+}: {
+  id: string;
+  status: string | null;
+  stages: string[];
+  joining?: JoiningStages;
+  dateOfJoining?: string | null;
+}) {
   const known = !status || stages.includes(status);
   const [choice, setChoice] = useState(known ? (status ?? "") : "__custom");
   const [error, action, pending] = useActionState(setCandidateStatus, null);
@@ -228,6 +263,7 @@ export function StatusForm({ id, status, stages }: { id: string; status: string 
         <option value="__custom">Other…</option>
       </Select>
       {choice === "__custom" && <Input name="status_custom" defaultValue={known ? "" : (status ?? "")} placeholder="Status" />}
+      <JoiningDate status={choice} stages={joining} defaultDate={dateOfJoining} />
       <Button type="submit" size="sm" disabled={pending}>
         {pending ? "Saving…" : "Set status"}
       </Button>
@@ -277,7 +313,8 @@ export function OpeningForm({ id, code, openings }: { id: string; code: string |
         <option value="">No opening</option>
         {openings.map((o) => (
           <option key={o.code} value={o.code}>
-            {o.code} · {o.designation}
+            {o.code}
+            {o.site ? ` · ${o.site}` : ""} · {o.designation}
           </option>
         ))}
       </Select>
@@ -587,6 +624,7 @@ export function OpeningStatusForm({ id, status }: { id: string; status: string }
       <Select name="status" defaultValue={status} disabled={pending} onChange={(e) => e.currentTarget.form?.requestSubmit()}>
         <option value="open">Open</option>
         <option value="in_progress">In progress</option>
+        <option value="accepted">Completed — not yet joined</option>
         <option value="filled">Filled</option>
         <option value="cancelled">Cancelled</option>
       </Select>
@@ -723,17 +761,35 @@ export function StagesForm({ stages }: { stages: StageRow[] }) {
 
 /** Status dropdown on the Candidates list: changes save as soon as a value
     is picked (only the Status cell of that row is written to the Excel). */
-export function InlineStatusSelect({ id, status, stages }: { id: string; status: string | null; stages: string[] }) {
+export function InlineStatusSelect({
+  id,
+  status,
+  stages,
+  joining,
+}: {
+  id: string;
+  status: string | null;
+  stages: string[];
+  joining?: JoiningStages;
+}) {
   const [error, action, pending] = useActionState(setCandidateStatus, null);
+  const [choice, setChoice] = useState(status ?? "");
   const options = status && !stages.includes(status) ? [status, ...stages] : stages;
+  // Most statuses save the moment they are picked; joining ones wait for a date.
+  const needsDate = Boolean(joining && choice && (choice === joining.joined || joining.accepted.includes(choice)));
   return (
-    <form action={action} className="flex flex-col gap-0.5">
+    <form action={action} className="flex flex-col gap-1">
       <input type="hidden" name="id" value={id} />
       <select
         name="status"
-        defaultValue={status ?? ""}
+        value={choice}
         disabled={pending}
-        onChange={(e) => e.currentTarget.form?.requestSubmit()}
+        onChange={(e) => {
+          const next = e.target.value;
+          setChoice(next);
+          const asks = Boolean(joining && next && (next === joining.joined || joining.accepted.includes(next)));
+          if (!asks) e.currentTarget.form?.requestSubmit();
+        }}
         className="max-w-48 rounded-md border border-line-strong bg-surface px-2 py-1 text-xs text-ink disabled:opacity-60"
         title={error ?? "Change status"}
       >
@@ -742,6 +798,14 @@ export function InlineStatusSelect({ id, status, stages }: { id: string; status:
           <option key={s}>{s}</option>
         ))}
       </select>
+      {needsDate && choice !== status && (
+        <span className="flex flex-wrap items-center gap-1.5">
+          <JoiningDate status={choice} stages={joining} />
+          <Button type="submit" size="sm" disabled={pending}>
+            Save
+          </Button>
+        </span>
+      )}
       {pending && <span className="text-[10px] text-ink-3">Saving…</span>}
       {error && <span className="max-w-48 text-[10px] leading-tight text-danger">{error}</span>}
     </form>

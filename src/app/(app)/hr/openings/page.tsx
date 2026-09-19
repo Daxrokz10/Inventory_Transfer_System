@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { TD, TH, TRow, Table } from "@/components/ui/Table";
 import { getHrContext } from "@/lib/hr/auth";
 import { OPENING_STATUS_TONE as STATUS_TONE } from "@/lib/hr/format";
-import { OPENING_STATUS_LABEL, PRIORITY_LABEL, getStages } from "@/lib/hr/data";
+import { OPENING_STATUS_LABEL, PRIORITY_LABEL, getStages, joiningStages } from "@/lib/hr/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type Search = { status?: string };
@@ -28,7 +28,7 @@ export default async function OpeningsPage({ searchParams }: { searchParams: Pro
     .select("id, code, designation, headcount, required_by, priority, status, acknowledged_at, raised_by, created_at, project:project_id(code, name)")
     .order("created_at", { ascending: false })
     .limit(300);
-  if (status === "active") query = query.in("status", ["open", "in_progress"]);
+  if (status === "active") query = query.in("status", ["open", "in_progress", "accepted"]);
   else if (status !== "all") query = query.eq("status", status);
   if (!access.hrStaff && !access.interviewer) query = query.eq("raised_by", user.id);
 
@@ -57,12 +57,13 @@ export default async function OpeningsPage({ searchParams }: { searchParams: Pro
       : Promise.resolve({ data: [] as { opening_id: string; status: string | null; n: number }[] }),
     admin.from("profiles").select("id, full_name"),
   ]);
-  const kindOf = new Map(stages.map((s) => [s.name, s.kind]));
-  const progress = new Map<string, { total: number; filled: number }>();
+  const { joined: joinedStage, accepted: acceptedStages } = joiningStages(stages);
+  const progress = new Map<string, { total: number; joined: number; accepted: number }>();
   for (const c of counts ?? []) {
-    const p = progress.get(c.opening_id) ?? { total: 0, filled: 0 };
+    const p = progress.get(c.opening_id) ?? { total: 0, joined: 0, accepted: 0 };
     p.total += c.n;
-    if (c.status && kindOf.get(c.status) === "success") p.filled += c.n;
+    if (c.status && c.status === joinedStage) p.joined += c.n;
+    else if (c.status && acceptedStages.includes(c.status)) p.accepted += c.n;
     progress.set(c.opening_id, p);
   }
   const nameOf = new Map((people ?? []).map((p) => [p.id, p.full_name ?? "—"]));
@@ -87,9 +88,10 @@ export default async function OpeningsPage({ searchParams }: { searchParams: Pro
       <form method="get" className="flex items-end gap-3">
         <Select name="status" defaultValue={status}>
           <option value="all">All openings</option>
-          <option value="active">Open & in progress</option>
+          <option value="active">Still hiring or joining</option>
           <option value="open">Open</option>
           <option value="in_progress">In progress</option>
+          <option value="accepted">Completed — not yet joined</option>
           <option value="filled">Filled</option>
           <option value="cancelled">Cancelled</option>
         </Select>
@@ -116,7 +118,7 @@ export default async function OpeningsPage({ searchParams }: { searchParams: Pro
             </thead>
             <tbody>
               {rows.map((r) => {
-                const p = progress.get(r.id) ?? { total: 0, filled: 0 };
+                const p = progress.get(r.id) ?? { total: 0, joined: 0, accepted: 0 };
                 return (
                   <TRow key={r.id}>
                     <TD className="whitespace-nowrap font-mono text-xs">
@@ -132,7 +134,8 @@ export default async function OpeningsPage({ searchParams }: { searchParams: Pro
                     <TD className="font-medium">{r.designation}</TD>
                     <TD className="text-ink-2">{r.project?.code ?? "—"}</TD>
                     <TD className="tabular-nums">
-                      {p.filled}/{r.headcount}
+                      {p.joined}/{r.headcount} joined
+                      {p.accepted > 0 && <p className="text-xs text-ink-3">+{p.accepted} accepted</p>}
                     </TD>
                     <TD className="whitespace-nowrap text-ink-2">
                       {r.required_by ? new Date(r.required_by).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}

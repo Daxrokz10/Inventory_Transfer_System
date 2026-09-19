@@ -10,6 +10,7 @@ import { CANDIDATE_FIELDS, rowHash, sameCell, type CandidateField, type Candidat
 import { SKILLS, parseScores, type Scores } from "@/lib/hr/evaluation";
 import { listPeople } from "@/lib/hr/people";
 import { listStages, nextStatus, panelVerdict } from "@/lib/hr/stageFlow";
+import { joiningStages } from "@/lib/hr/data";
 import {
   ExcelConflictError,
   appendCandidateToExcel,
@@ -210,9 +211,24 @@ export async function setCandidateStatus(_prev: string | null, fd: FormData): Pr
   const id = text(fd, "id");
   if (!id) return "Missing candidate.";
   const status = fd.get("status") === "__custom" ? text(fd, "status_custom") : text(fd, "status");
+
+  // Joining needs a date: the one picked with the status, or one already on
+  // file from the HR decision card. For an accepted offer the date is the
+  // expected joining day and may be left for later.
+  const { joined, accepted } = joiningStages(await listStages());
+  const isJoined = Boolean(status && status === joined);
+  const asksDate = isJoined || Boolean(status && accepted.includes(status));
+  const date = parseDay(text(fd, "joining_date"));
+  if (isJoined && !date) {
+    const { data: cur } = await supabase.from("hr_candidates").select("date_of_joining").eq("id", id).maybeSingle();
+    if (!parseDay(cur?.date_of_joining ?? null)) return "Pick the date they joined.";
+  }
+
   const err = await applyChange(supabase, user.id, id, { status });
-  if (!err) await settleJoining(supabase, id, status);
-  return err;
+  if (err) return err;
+  if (asksDate && date) await supabase.from("hr_candidates").update({ date_of_joining: date }).eq("id", id);
+  await settleOpening(supabase, id, status);
+  return null;
 }
 
 /** dd/mm/yyyy or yyyy-mm-dd → yyyy-mm-dd. */
@@ -230,12 +246,11 @@ const todayIst = () =>
     new Date(),
   );
 
-/** Joining ends the process for that person: record the day, and move the
-    opening on — filled only once as many people have joined as were asked for.
-    Undoing the status clears it again. */
-async function settleJoining(supabase: Supabase, candidateId: string, status: string | null): Promise<void> {
-  const stages = await listStages();
-  const joined = Boolean(status && stages.find((s) => s.name === status)?.kind === "success");
+/** After a candidate's status changes: record the joining day when they have
+    joined (clear it when that is undone), then bring their opening up to date. */
+async function settleOpening(supabase: Supabase, candidateId: string, status: string | null): Promise<void> {
+  const { joined, accepted } = joiningStages(await listStages());
+  const isJoined = Boolean(status && status === joined);
 
   const { data: c } = await supabase
     .from("hr_candidates")
@@ -244,63 +259,87 @@ async function settleJoining(supabase: Supabase, candidateId: string, status: st
     .maybeSingle();
   if (!c) return;
 
-  if (!joined) {
-    if (c.joined_on) await supabase.from("hr_candidates").update({ joined_on: null }).eq("id", candidateId);
-    if (c.opening_id) await reopenIfShort(supabase, c.opening_id);
-    return;
+  if (isJoined) {
+    const day = parseDay(c.date_of_joining) ?? c.joined_on ?? todayIst();
+    await supabase.from("hr_candidates").update({ joined_on: day }).eq("id", candidateId);
+  } else if (c.joined_on) {
+    await supabase.from("hr_candidates").update({ joined_on: null }).eq("id", candidateId);
   }
 
-  const day = parseDay(c.date_of_joining) ?? c.joined_on ?? todayIst();
-  await supabase.from("hr_candidates").update({ joined_on: day }).eq("id", candidateId);
-  if (!c.opening_id) return;
+  if (c.opening_id) {
+    await refreshOpening(supabase, c.opening_id, {
+      name: c.name,
+      joined: isJoined,
+      accepted: Boolean(status && accepted.includes(status)),
+    });
+  }
+}
 
+/** An opening's state follows its candidates:
+      everyone needed has joined              → filled
+      offers accepted cover the headcount     → accepted ("Completed — not yet joined")
+      some accepted or joined, not enough yet → in progress
+    Cancelled openings are left alone. HR is told when someone accepts or joins. */
+async function refreshOpening(
+  supabase: Supabase,
+  openingId: string,
+  event?: { name: string; joined: boolean; accepted: boolean },
+): Promise<void> {
   const { data: opening } = await supabase
     .from("hr_openings")
     .select("code, status, headcount")
-    .eq("id", c.opening_id)
+    .eq("id", openingId)
     .maybeSingle();
   if (!opening || opening.status === "cancelled") return;
 
-  const { count } = await supabase
-    .from("hr_candidates")
-    .select("id", { count: "exact", head: true })
-    .eq("opening_id", c.opening_id)
-    .not("joined_on", "is", null);
-  const joinedCount = count ?? 1;
+  const { accepted } = joiningStages(await listStages());
   const needed = Math.max(1, opening.headcount);
-  const complete = joinedCount >= needed;
-  const next = complete ? "filled" : "in_progress";
-  if (opening.status !== next) await supabase.from("hr_openings").update({ status: next }).eq("id", c.opening_id);
+  const [{ count: joinedCount }, { count: acceptedCount }] = await Promise.all([
+    supabase
+      .from("hr_candidates")
+      .select("id", { count: "exact", head: true })
+      .eq("opening_id", openingId)
+      .not("joined_on", "is", null),
+    accepted.length
+      ? supabase
+          .from("hr_candidates")
+          .select("id", { count: "exact", head: true })
+          .eq("opening_id", openingId)
+          .is("joined_on", null)
+          .in("status", accepted)
+      : Promise.resolve({ count: 0 }),
+  ]);
+  const hasJoined = joinedCount ?? 0;
+  const hired = hasJoined + (acceptedCount ?? 0);
 
-  await notify(await hrStaffIds(), {
-    kind: complete ? "opening_filled" : "opening_progress",
-    title: complete
-      ? `${opening.code} filled — ${c.name} joined`
-      : `${c.name} joined ${opening.code} — ${needed - joinedCount} still needed`,
-    body: `${joinedCount} of ${needed} joined.`,
-    link: `/hr/openings/${c.opening_id}`,
-  });
-  revalidatePath("/hr/openings", "layout");
-}
-
-/** A joining undone (or a joiner untagged) can take an opening back below its
-    headcount; it should not stay marked filled. */
-async function reopenIfShort(supabase: Supabase, openingId: string): Promise<void> {
-  const { data: opening } = await supabase
-    .from("hr_openings")
-    .select("status, headcount")
-    .eq("id", openingId)
-    .maybeSingle();
-  if (!opening || opening.status !== "filled") return;
-  const { count } = await supabase
-    .from("hr_candidates")
-    .select("id", { count: "exact", head: true })
-    .eq("opening_id", openingId)
-    .not("joined_on", "is", null);
-  if ((count ?? 0) < Math.max(1, opening.headcount)) {
-    await supabase.from("hr_openings").update({ status: "in_progress" }).eq("id", openingId);
-    revalidatePath("/hr/openings", "layout");
+  let next = opening.status;
+  if (hasJoined >= needed) next = "filled";
+  else if (hired >= needed) next = "accepted";
+  else if (hired > 0 || opening.status === "filled" || opening.status === "accepted") next = "in_progress";
+  if (next !== opening.status) {
+    await supabase
+      .from("hr_openings")
+      .update({ status: next, filled_at: next === "filled" ? new Date().toISOString() : null })
+      .eq("id", openingId);
   }
+
+  if (event && (event.joined || event.accepted)) {
+    const title =
+      next === "filled"
+        ? `${opening.code} filled — ${event.name} joined`
+        : next === "accepted"
+          ? `${opening.code} completed — waiting for joining`
+          : event.joined
+            ? `${event.name} joined ${opening.code}`
+            : `${event.name} accepted the offer for ${opening.code}`;
+    await notify(await hrStaffIds(), {
+      kind: next === "filled" ? "opening_filled" : "opening_progress",
+      title,
+      body: `${hasJoined} of ${needed} joined · ${hired} of ${needed} offers accepted.`,
+      link: `/hr/openings/${openingId}`,
+    });
+  }
+  revalidatePath("/hr/openings", "layout");
 }
 
 export async function setCandidateResume(_prev: string | null, fd: FormData): Promise<string | null> {
@@ -318,7 +357,20 @@ export async function setCandidateOpening(_prev: string | null, fd: FormData): P
   if (!id) return "Missing candidate.";
   const code = text(fd, "opening_code")?.toUpperCase() ?? null;
   if (code && !(await openingIdFor(supabase, code))) return `Opening ${code} doesn't exist.`;
-  return applyChange(supabase, user.id, id, { opening_code: code });
+  return moveToOpening(supabase, user.id, id, code);
+}
+
+/** Change a candidate's opening, then recount both the opening they left and
+    the one they joined — moving a hire can fill one and reopen the other. */
+async function moveToOpening(supabase: Supabase, userId: string, id: string, code: string | null): Promise<string | null> {
+  const { data: before } = await supabase.from("hr_candidates").select("opening_id").eq("id", id).maybeSingle();
+  const err = await applyChange(supabase, userId, id, { opening_code: code });
+  if (err) return err;
+  const { data: after } = await supabase.from("hr_candidates").select("opening_id").eq("id", id).maybeSingle();
+  for (const openingId of new Set([before?.opening_id, after?.opening_id])) {
+    if (openingId) await refreshOpening(supabase, openingId);
+  }
+  return null;
 }
 
 /** From an opening's page: tag a candidate by Candidate ID. */
@@ -329,7 +381,7 @@ export async function tagCandidateToOpening(_prev: string | null, fd: FormData):
   if (!openingCode || !candidateCode) return "Enter a Candidate ID.";
   const { data: c } = await supabase.from("hr_candidates").select("id").eq("candidate_code", candidateCode).maybeSingle();
   if (!c) return `No candidate with ID ${candidateCode}.`;
-  const r = await applyChange(supabase, user.id, c.id, { opening_code: openingCode });
+  const r = await moveToOpening(supabase, user.id, c.id, openingCode);
   revalidatePath("/hr/openings", "layout");
   return r;
 }
@@ -352,7 +404,7 @@ export async function saveHrDecision(_prev: string | null, fd: FormData): Promis
   if (error) return error.message;
   // Keep the joining day in step with the date HR just typed.
   const { data: c } = await supabase.from("hr_candidates").select("status").eq("id", id).maybeSingle();
-  await settleJoining(supabase, id, c?.status ?? null);
+  await settleOpening(supabase, id, c?.status ?? null);
   revalidateHr(id);
   return "Saved.";
 }
@@ -698,10 +750,17 @@ export async function setOpeningStatus(_prev: string | null, fd: FormData): Prom
   const { supabase } = await getHrContext("staff");
   const id = text(fd, "id");
   const status = text(fd, "status");
-  if (!id || !status || !["open", "in_progress", "filled", "cancelled"].includes(status)) return "Invalid status.";
+  if (!id || !status || !["open", "in_progress", "accepted", "filled", "cancelled"].includes(status)) return "Invalid status.";
+  const now = new Date().toISOString();
+  const { data: cur } = await supabase.from("hr_openings").select("status, filled_at").eq("id", id).maybeSingle();
   const { error } = await supabase
     .from("hr_openings")
-    .update({ status, updated_at: new Date().toISOString() })
+    .update({
+      status,
+      updated_at: now,
+      // Keep the original fill date if it was already filled.
+      filled_at: status === "filled" ? (cur?.status === "filled" ? cur.filled_at : now) : null,
+    })
     .eq("id", id);
   if (error) return error.message;
   revalidatePath("/hr/openings", "layout");

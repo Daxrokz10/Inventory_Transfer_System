@@ -10,20 +10,32 @@ export async function getStages(): Promise<Stage[]> {
   return (data ?? []) as Stage[];
 }
 
-/** Openings HR can still tag candidates to. */
-export async function getOpenOpenings(): Promise<{ id: string; code: string; designation: string }[]> {
+/** Openings HR can still tag candidates to, with the site they are for. */
+export async function getOpenOpenings(): Promise<{ id: string; code: string; designation: string; site: string | null }[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("hr_openings")
-    .select("id, code, designation")
-    .in("status", ["open", "in_progress"])
+    .select("id, code, designation, project:project_id(code)")
+    .in("status", ["open", "in_progress", "accepted"])
     .order("code", { ascending: false });
-  return data ?? [];
+  return ((data ?? []) as unknown as { id: string; code: string; designation: string; project: { code: string } | null }[]).map(
+    (o) => ({ id: o.id, code: o.code, designation: o.designation, site: o.project?.code ?? null }),
+  );
+}
+
+/** The stages that end a hire: "Joined" (the person turned up) and the
+    success stages before it, such as "Offer Accepted". Without a stage named
+    Joined, the last success stage stands in for it. */
+export function joiningStages(stages: Stage[]): { joined: string | null; accepted: string[] } {
+  const success = stages.filter((s) => s.kind === "success").sort((a, b) => a.sort_order - b.sort_order);
+  const joined = success.find((s) => /^joined$/i.test(s.name.trim()))?.name ?? success.at(-1)?.name ?? null;
+  return { joined, accepted: success.map((s) => s.name).filter((n) => n !== joined) };
 }
 
 export const OPENING_STATUS_LABEL: Record<string, string> = {
   open: "Open",
   in_progress: "In progress",
+  accepted: "Completed — not yet joined",
   filled: "Filled",
   cancelled: "Cancelled",
 };

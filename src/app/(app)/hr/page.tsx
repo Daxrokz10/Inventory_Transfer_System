@@ -5,7 +5,7 @@ import { Input, Select } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { TD, TH, TRow, Table } from "@/components/ui/Table";
 import { getHrContext } from "@/lib/hr/auth";
-import { getDesignations, getOpenOpenings, getStages } from "@/lib/hr/data";
+import { getDesignations, getOpenOpenings, getStages, joiningStages } from "@/lib/hr/data";
 import { fmtAgo } from "@/lib/hr/format";
 import { getConnection, isExcelReady, syncIfStale } from "@/lib/hr/sync";
 import { InlineStatusSelect, QuickAddPanel, SyncButton } from "./HrForms";
@@ -51,6 +51,7 @@ export default async function CandidatesPage({ searchParams }: { searchParams: P
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const excel = isExcelReady(conn);
   const stageNames = stages.map((s) => s.name);
+  const joining = joiningStages(stages);
   const firstActive = stages.find((s) => s.kind === "active" && s.sort_order < 1000)?.name ?? null;
 
   const pageHref = (p: number) => {
@@ -165,7 +166,7 @@ export default async function CandidatesPage({ searchParams }: { searchParams: P
                     {r.current_salary ?? "—"} <span className="text-ink-3">→</span> {r.expected_salary ?? "—"}
                   </TD>
                   <TD className="align-top">
-                    <InlineStatusSelect key={r.status ?? ""} id={r.id} status={r.status} stages={stageNames} />
+                    <InlineStatusSelect key={r.status ?? ""} id={r.id} status={r.status} stages={stageNames} joining={joining} />
                   </TD>
                   <TD className="whitespace-nowrap align-top">
                     <Link href={`/hr/candidates/${r.id}`} className="text-xs font-medium text-accent hover:underline">

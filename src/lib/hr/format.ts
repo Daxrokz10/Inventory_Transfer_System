@@ -44,6 +44,7 @@ export function fmtAgo(iso: string | null): string {
 export const OPENING_STATUS_TONE: Record<string, BadgeTone> = {
   open: "accent",
   in_progress: "warn",
+  accepted: "accent",
   filled: "good",
   cancelled: "neutral",
 };
@@ -63,6 +64,11 @@ export function joiningNote(
   return days < 0
     ? { text: `Joined ${fmtDay(joinedOn)} — ${-days} day${days === -1 ? "" : "s"} before needed`, tone: "good" }
     : { text: `Joined ${fmtDay(joinedOn)} — ${days} day${days === 1 ? "" : "s"} late`, tone: "warn" };
+}
+
+/** ISO timestamp for `days` days ago. */
+export function daysAgoIso(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString();
 }
 
 /** Whole days since an ISO timestamp. */

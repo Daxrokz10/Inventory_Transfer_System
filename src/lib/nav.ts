@@ -85,7 +85,9 @@ function hrNav(a: Access): NavItem[] {
       { href: "/hr/interviews", label: "Interviews" },
     );
   } else if (a.planning || a.interviewer) {
-    // Interviewers see what the company is hiring for, read-only.
+    // Planning follows their own openings on the status board; interviewers
+    // see what the company is hiring for. Both read-only.
+    if (a.planning) items.push({ href: "/hr/status", label: "Status" });
     items.push({ href: "/hr/openings", label: "Openings" });
   }
   if (a.interviewer) items.push({ href: "/hr/my-interviews", label: "My Interviews" });

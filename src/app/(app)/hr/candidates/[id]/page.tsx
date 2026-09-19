@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardLabel } from "@/components/ui/Card";
 import { getHrContext } from "@/lib/hr/auth";
-import { getOpenOpenings, getStages } from "@/lib/hr/data";
+import { getOpenOpenings, getStages, joiningStages } from "@/lib/hr/data";
 import { RECOMMENDATION_LABEL, fmtDateTime, recommendationTone, statusTone } from "@/lib/hr/format";
 import { listPeople } from "@/lib/hr/people";
 import { FIELD_LABELS } from "@/lib/hr/sheet";
@@ -161,7 +161,16 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
             )}
           </p>
         </div>
-        {isHr && <StatusForm key={c.status ?? ""} id={c.id} status={c.status} stages={stages.map((s) => s.name)} />}
+        {isHr && (
+          <StatusForm
+            key={c.status ?? ""}
+            id={c.id}
+            status={c.status}
+            stages={stages.map((s) => s.name)}
+            joining={joiningStages(stages)}
+            dateOfJoining={c.date_of_joining}
+          />
+        )}
       </div>
 
       <div className="grid gap-5 xl:grid-cols-5">
