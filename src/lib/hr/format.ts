@@ -52,18 +52,55 @@ export const OPENING_STATUS_TONE: Record<string, BadgeTone> = {
 export const fmtDay = (day: string | null) =>
   day ? new Date(`${day}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
 
+/** dd/mm/yyyy or yyyy-mm-dd → yyyy-mm-dd (null if it isn't a date). */
+export function toIsoDay(s: string | null | undefined): string | null {
+  const v = s?.trim();
+  if (!v) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const dmy = /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.exec(v);
+  return dmy ? `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}` : null;
+}
+
+function versusNeeded(day: string, requiredBy: string | null): { suffix: string; late: boolean } {
+  if (!requiredBy) return { suffix: "", late: false };
+  const days = Math.round((new Date(day).getTime() - new Date(requiredBy).getTime()) / 86_400_000);
+  if (days === 0) return { suffix: " — on the date needed", late: false };
+  return days < 0
+    ? { suffix: ` — ${-days} day${days === -1 ? "" : "s"} before needed`, late: false }
+    : { suffix: ` — ${days} day${days === 1 ? "" : "s"} late`, late: true };
+}
+
 /** How the joining day compares with the date planning asked for. */
 export function joiningNote(
   joinedOn: string | null,
   requiredBy: string | null,
 ): { text: string; tone: BadgeTone } | null {
   if (!joinedOn) return null;
-  if (!requiredBy) return { text: `Joined ${fmtDay(joinedOn)}`, tone: "good" };
-  const days = Math.round((new Date(joinedOn).getTime() - new Date(requiredBy).getTime()) / 86_400_000);
-  if (days === 0) return { text: `Joined ${fmtDay(joinedOn)} — on the date needed`, tone: "good" };
-  return days < 0
-    ? { text: `Joined ${fmtDay(joinedOn)} — ${-days} day${days === -1 ? "" : "s"} before needed`, tone: "good" }
-    : { text: `Joined ${fmtDay(joinedOn)} — ${days} day${days === 1 ? "" : "s"} late`, tone: "warn" };
+  const v = versusNeeded(joinedOn, requiredBy);
+  return { text: `Joined ${fmtDay(joinedOn)}${v.suffix}`, tone: v.late ? "warn" : "good" };
+}
+
+/** A joining date agreed but not reached yet (offer accepted). */
+export function expectedJoiningNote(
+  dateOfJoining: string | null | undefined,
+  requiredBy: string | null,
+): { text: string; tone: BadgeTone } | null {
+  const day = toIsoDay(dateOfJoining);
+  if (!day) return null;
+  const v = versusNeeded(day, requiredBy);
+  return { text: `Joining ${fmtDay(day)}${v.suffix.replace(" late", " after needed")}`, tone: v.late ? "warn" : "accent" };
+}
+
+/** "3 needed · 1 joined · 1 joining · 1 still to hire" — each hire counts once,
+    whether they have joined or only accepted. */
+export function hiringSummary(headcount: number, joined: number, joining: number): string {
+  const needed = Math.max(1, headcount);
+  const parts = [`${needed} needed`];
+  if (joined) parts.push(`${joined} joined`);
+  if (joining) parts.push(`${joining} joining`);
+  const left = Math.max(0, needed - joined - joining);
+  if (joined || joining) parts.push(left ? `${left} still to hire` : "all hired");
+  return parts.join(" · ");
 }
 
 /** ISO timestamp for `days` days ago. */

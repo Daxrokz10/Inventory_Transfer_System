@@ -16,6 +16,7 @@ export type CandidateRow = {
   created_at: string;
   opening_id: string | null;
   joined_on?: string | null;
+  date_of_joining?: string | null;
 };
 
 type Opening = { id: string; code: string; designation: string; headcount: number; created_at: string; raised_by: string | null };

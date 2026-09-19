@@ -7,8 +7,16 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { cn } from "@/lib/cn";
 import { getHrContext } from "@/lib/hr/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { OPENING_STATUS_LABEL, getStages } from "@/lib/hr/data";
-import { OPENING_STATUS_TONE, daysAgoIso, joiningNote, statusTone } from "@/lib/hr/format";
+import { OPENING_STATUS_LABEL, getStages, joiningStages } from "@/lib/hr/data";
+import {
+  OPENING_STATUS_TONE,
+  daysAgoIso,
+  expectedJoiningNote,
+  hiringSummary,
+  joiningNote,
+  statusTone,
+  toIsoDay,
+} from "@/lib/hr/format";
 import { buildTimelines, type CandidateRow } from "@/lib/hr/progress";
 import { syncIfStale } from "@/lib/hr/sync";
 import { TimelineStrip } from "../Timeline";
@@ -23,7 +31,8 @@ const RECENT_DAYS = 60;
 
 type Search = { candidate?: string; opening?: string; q?: string; show?: string };
 
-const CANDIDATE_COLUMNS = "id, candidate_code, name, designation, status, entry_date, created_at, opening_id, joined_on";
+const CANDIDATE_COLUMNS =
+  "id, candidate_code, name, designation, status, entry_date, created_at, opening_id, joined_on, date_of_joining";
 
 type OpeningRow = {
   id: string;
@@ -122,19 +131,33 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
     else if (!g) groups.unshift({ opening: null, rows: [focus], total: 1 });
   }
 
-  // Whoever joined against an opening is always shown, in full, whatever the
-  // filter says — that is the row the opening was raised for.
+  // Everyone hired against an opening — joined, or offer accepted and waiting
+  // to join — is always shown at the top of it, whatever the filter says: they
+  // are what the opening was raised for. Each carries their own date.
   const openingIds = openings.map((o) => o.id);
-  const { data: joinedRows } = openingIds.length
-    ? await db.from("hr_candidates").select(CANDIDATE_COLUMNS).in("opening_id", openingIds).not("joined_on", "is", null)
+  const { accepted: acceptedStages } = joiningStages(stages);
+  const hireFilter = [
+    "joined_on.not.is.null",
+    "date_of_joining.not.is.null",
+    ...(acceptedStages.length ? [`status.in.${inList(acceptedStages)}`] : []),
+  ].join(",");
+  const { data: hireRows } = openingIds.length
+    ? await db.from("hr_candidates").select(CANDIDATE_COLUMNS).in("opening_id", openingIds).or(hireFilter)
     : { data: [] as CandidateRow[] };
-  const joinedBy = new Map<string, CandidateRow[]>();
-  for (const r of (joinedRows ?? []) as CandidateRow[]) {
-    if (r.opening_id) joinedBy.set(r.opening_id, [...(joinedBy.get(r.opening_id) ?? []), r]);
+  const hiresBy = new Map<string, CandidateRow[]>();
+  // Someone who backed out (Rejected before joining, or any closed stage) is no
+  // longer a hire, even with a joining date still on file.
+  const closedSet = new Set(closedStages);
+  for (const r of (hireRows ?? []) as CandidateRow[]) {
+    if (r.opening_id && !(r.status && closedSet.has(r.status))) hiresBy.set(r.opening_id, [...(hiresBy.get(r.opening_id) ?? []), r]);
   }
+  // Joined first (by date), then those still to join (by expected date).
+  const hireOrder = (a: CandidateRow, b: CandidateRow) =>
+    Number(!a.joined_on) - Number(!b.joined_on) ||
+    (a.joined_on ?? toIsoDay(a.date_of_joining) ?? "9").localeCompare(b.joined_on ?? toIsoDay(b.date_of_joining) ?? "9");
 
   const timelines = await buildTimelines(
-    [...groups.flatMap((g) => g.rows), ...[...joinedBy.values()].flat()],
+    [...groups.flatMap((g) => g.rows), ...[...hiresBy.values()].flat()],
     allOpenings,
     isHr ? undefined : db,
   );
@@ -203,9 +226,10 @@ No openings are being hired for right now. Planning raises them from the Opening
       )}
 
       {groups.map((g, gi) => {
-        const joiners = (g.opening ? joinedBy.get(g.opening.id) : undefined) ?? [];
-        const joinedIds = new Set(joiners.map((j) => j.id));
-        const rest = g.rows.filter((c) => !joinedIds.has(c.id));
+        const hires = [...((g.opening ? hiresBy.get(g.opening.id) : undefined) ?? [])].sort(hireOrder);
+        const hireIds = new Set(hires.map((j) => j.id));
+        const rest = g.rows.filter((c) => !hireIds.has(c.id));
+        const joinedCount = hires.filter((h) => h.joined_on).length;
         return (
         <div key={g.opening?.id ?? "none"} className="space-y-3">
         {gi === firstCompleted && (
@@ -223,10 +247,7 @@ No openings are being hired for right now. Planning raises them from the Opening
                 </Link>
                 <p className="text-xs text-ink-2">
                   {g.opening.project ? `${g.opening.project.code} · ` : ""}
-                  {g.opening.headcount} needed
-                  {joiners.length > 0
-                    ? ` · ${joiners.length} joined · ${Math.max(0, g.opening.headcount - joiners.length)} still needed`
-                    : ""}{" "}
+                  {hiringSummary(g.opening.headcount, joinedCount, hires.length - joinedCount)}{" "}
                   · raised{" "}
                   {new Date(g.opening.created_at).toLocaleDateString("en-IN", {
                     day: "2-digit",
@@ -254,10 +275,20 @@ No openings are being hired for right now. Planning raises them from the Opening
             </div>
           </header>
 
-          {joiners.map((joined) => {
-            const note = joiningNote(joined.joined_on ?? null, g.opening?.required_by ?? null);
+          {hires.map((joined) => {
+            const requiredBy = g.opening?.required_by ?? null;
+            const note = joined.joined_on
+              ? joiningNote(joined.joined_on, requiredBy)
+              : (expectedJoiningNote(joined.date_of_joining, requiredBy) ?? {
+                  text: "Offer accepted — joining date not set",
+                  tone: "warn" as const,
+                });
             return (
-            <section key={joined.id} id={`cand-${joined.id}`} className="border-b border-line bg-good-soft/40 px-5 py-4">
+            <section
+              key={joined.id}
+              id={`cand-${joined.id}`}
+              className={cn("border-b border-line px-5 py-4", joined.joined_on ? "bg-good-soft/40" : "bg-accent-soft/30")}
+            >
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <p className="text-sm">
                   {candidateName(joined, "font-semibold")}
@@ -267,7 +298,7 @@ No openings are being hired for right now. Planning raises them from the Opening
                 {note && <Badge tone={note.tone}>{note.text}</Badge>}
               </div>
               <p className="mt-1 mb-2 text-xs text-ink-2">
-                Hired for this opening ·{" "}
+                {joined.joined_on ? "Joined against this opening" : "Accepted the offer, still to join"} ·{" "}
                 {g.opening && (
                   <Link href={`/hr/openings/${g.opening.id}`} className="text-accent hover:underline">
                     full timeline on the opening →
@@ -280,7 +311,7 @@ No openings are being hired for right now. Planning raises them from the Opening
           })}
 
           <ul className="divide-y divide-line">
-            {rest.length === 0 && joiners.length === 0 && (
+            {rest.length === 0 && hires.length === 0 && (
               <li className="px-5 py-4 text-sm text-ink-2">No candidates for this filter.</li>
             )}
             {rest.map((c) => (

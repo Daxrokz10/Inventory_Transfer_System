@@ -4,7 +4,14 @@ import { Badge } from "@/components/ui/Badge";
 import { Card, CardLabel } from "@/components/ui/Card";
 import { getHrContext } from "@/lib/hr/auth";
 import { OPENING_STATUS_LABEL, PRIORITY_LABEL, getStages, joiningStages } from "@/lib/hr/data";
-import { OPENING_STATUS_TONE as STATUS_TONE, joiningNote, statusTone } from "@/lib/hr/format";
+import {
+  OPENING_STATUS_TONE as STATUS_TONE,
+  expectedJoiningNote,
+  hiringSummary,
+  joiningNote,
+  statusTone,
+  toIsoDay,
+} from "@/lib/hr/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OpeningStatusForm, TagCandidateForm } from "../../HrForms";
 import { Timeline, TimelineStrip } from "../../Timeline";
@@ -44,7 +51,7 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
     canSeeProgress
       ? progressClient
           .from("hr_candidates")
-          .select("id, candidate_code, name, designation, status, entry_date, created_at, opening_id, joined_on")
+          .select("id, candidate_code, name, designation, status, entry_date, created_at, opening_id, joined_on, date_of_joining")
           .eq("opening_id", id)
           .order("updated_at", { ascending: false })
           .limit(200)
@@ -55,16 +62,30 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
   const order = new Map(stages.map((s, i) => [s.name, i]));
   const kindOf = new Map(stages.map((s) => [s.name, s.kind]));
   const byStage = [...(counts ?? [])].sort((a, b) => (order.get(a.status ?? "") ?? 999) - (order.get(b.status ?? "") ?? 999));
-  const { joined: joinedStage } = joiningStages(stages);
+  const { joined: joinedStage, accepted: acceptedStages } = joiningStages(stages);
+  // Counts for the header work for everyone who can open the page, including
+  // interviewers, who don't get the candidate list.
   const joinedN = byStage.filter((c) => c.status === joinedStage).reduce((s, c) => s + c.n, 0);
-  const acceptedN = byStage
-    .filter((c) => c.status && kindOf.get(c.status) === "success" && c.status !== joinedStage)
-    .reduce((s, c) => s + c.n, 0);
+  const acceptedN = byStage.filter((c) => c.status && acceptedStages.includes(c.status)).reduce((s, c) => s + c.n, 0);
 
-  // Whoever actually joined against this requirement. Their journey belongs
-  // here, in full — the status board keeps only the one-line version.
-  const joiners = candidates.filter((c) => c.joined_on).sort((a, b) => (a.joined_on ?? "").localeCompare(b.joined_on ?? ""));
-  const stillNeeded = Math.max(0, Math.max(1, opening.headcount) - joinedN);
+  // Everyone hired against this requirement — joined, or accepted and waiting to
+  // join — each with their own date. With several people needed, each is shown
+  // separately: joined first by date, then those still to join by expected date.
+  const hires = candidates
+    .filter((c) => !(c.status && kindOf.get(c.status) === "closed"))
+    .filter((c) => c.joined_on || toIsoDay(c.date_of_joining) || (c.status && acceptedStages.includes(c.status)))
+    .sort(
+      (a, b) =>
+        Number(!a.joined_on) - Number(!b.joined_on) ||
+        (a.joined_on ?? toIsoDay(a.date_of_joining) ?? "9").localeCompare(b.joined_on ?? toIsoDay(b.date_of_joining) ?? "9"),
+    );
+  const hireNote = (c: CandidateRow) =>
+    c.joined_on
+      ? joiningNote(c.joined_on, opening.required_by)
+      : (expectedJoiningNote(c.date_of_joining, opening.required_by) ?? {
+          text: "Offer accepted — joining date not set",
+          tone: "warn" as const,
+        });
   // Every tagged candidate's journey lives here — this is the page that tells
   // the whole story of the requirement.
   const timelines = await buildTimelines(
@@ -96,10 +117,21 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
           <h1 className="text-2xl font-semibold tracking-tight text-ink">{opening.designation}</h1>
           <p className="mt-1 flex items-center gap-2 text-sm text-ink-2">
             <Badge tone={STATUS_TONE[opening.status]}>{OPENING_STATUS_LABEL[opening.status]}</Badge>
-            {joinedN}/{opening.headcount} joined
-            {acceptedN > 0 && ` · ${acceptedN} offer${acceptedN === 1 ? "" : "s"} accepted, not yet joined`}
-            {joinedN > 0 && stillNeeded > 0 && ` · ${stillNeeded} still to join`}
+            {hiringSummary(opening.headcount, joinedN, acceptedN)}
           </p>
+          {canSeeProgress && hires.length > 0 && (
+            <ul className="mt-2 space-y-1 text-sm">
+              {hires.map((h) => {
+                const note = hireNote(h);
+                return (
+                  <li key={h.id} className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium text-ink">{h.name}</span>
+                    {note && <Badge tone={note.tone}>{note.text}</Badge>}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
         {access.hrStaff && <OpeningStatusForm id={opening.id} status={opening.status} />}
       </div>
@@ -146,15 +178,17 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
       </div>
 
       {canSeeProgress &&
-        joiners.map((j) => {
-          const note = joiningNote(j.joined_on ?? null, opening.required_by);
+        hires.map((j) => {
+          const note = hireNote(j);
           return (
             <Card key={j.id} className="p-0">
               <details open className="group">
                 <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-5 py-3 text-sm">
                   <span>
-                    <span className="font-semibold text-ink">{j.name} joined</span>
-                    <span className="ml-2 text-ink-2">the whole journey, from requirement to joining</span>
+                    <span className="font-semibold text-ink">{j.name} {j.joined_on ? "joined" : "is joining"}</span>
+                    <span className="ml-2 text-ink-2">
+                      the whole journey, from requirement to {j.joined_on ? "joining" : "accepted offer"}
+                    </span>
                   </span>
                   <span className="flex items-center gap-2">
                     {note && <Badge tone={note.tone}>{note.text}</Badge>}
@@ -192,7 +226,14 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
                       <span className="ml-2 text-ink-2">{c.designation ?? ""}</span>
                       <span className="ml-2 font-mono text-[11px] text-ink-3">{c.candidate_code}</span>
                     </span>
-                    {c.status && <Badge tone={statusTone(c.status)}>{c.status}</Badge>}
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      {!c.joined_on && expectedJoiningNote(c.date_of_joining, opening.required_by) && (
+                        <Badge tone={expectedJoiningNote(c.date_of_joining, opening.required_by)!.tone}>
+                          {expectedJoiningNote(c.date_of_joining, opening.required_by)!.text}
+                        </Badge>
+                      )}
+                      {c.status && <Badge tone={statusTone(c.status)}>{c.status}</Badge>}
+                    </span>
                   </div>
                   <details className="group">
                     <summary className="cursor-pointer list-none">
