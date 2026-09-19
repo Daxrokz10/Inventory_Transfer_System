@@ -95,3 +95,25 @@ export async function buildTimelines(
   }
   return out;
 }
+
+/** The day each candidate's offer was accepted (their latest move onto an
+    accepted-offer stage), as yyyy-mm-dd in India time. Used to judge the
+    hiring on its own, separately from the notice period before joining. */
+export async function offerAcceptedDates(
+  ids: string[],
+  acceptedStages: string[],
+  client?: Awaited<ReturnType<typeof createClient>>,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!ids.length || !acceptedStages.length) return out;
+  const supabase = client ?? (await createClient());
+  const { data } = await supabase
+    .from("hr_status_history")
+    .select("candidate_id, changed_at")
+    .in("candidate_id", ids)
+    .in("to_status", acceptedStages)
+    .order("changed_at");
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
+  for (const h of data ?? []) out.set(h.candidate_id, day.format(new Date(h.changed_at)));
+  return out;
+}

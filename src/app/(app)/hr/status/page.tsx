@@ -11,13 +11,12 @@ import { OPENING_STATUS_LABEL, getStages, joiningStages } from "@/lib/hr/data";
 import {
   OPENING_STATUS_TONE,
   daysAgoIso,
-  expectedJoiningNote,
   hiringSummary,
-  joiningNote,
+  hireNotes,
   statusTone,
   toIsoDay,
 } from "@/lib/hr/format";
-import { buildTimelines, type CandidateRow } from "@/lib/hr/progress";
+import { buildTimelines, offerAcceptedDates, type CandidateRow } from "@/lib/hr/progress";
 import { syncIfStale } from "@/lib/hr/sync";
 import { TimelineStrip } from "../Timeline";
 import { ScrollToCard } from "./ScrollToCard";
@@ -156,11 +155,14 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
     Number(!a.joined_on) - Number(!b.joined_on) ||
     (a.joined_on ?? toIsoDay(a.date_of_joining) ?? "9").localeCompare(b.joined_on ?? toIsoDay(b.date_of_joining) ?? "9");
 
-  const timelines = await buildTimelines(
-    [...groups.flatMap((g) => g.rows), ...[...hiresBy.values()].flat()],
-    allOpenings,
-    isHr ? undefined : db,
-  );
+  const [timelines, offerDates] = await Promise.all([
+    buildTimelines([...groups.flatMap((g) => g.rows), ...[...hiresBy.values()].flat()], allOpenings, isHr ? undefined : db),
+    offerAcceptedDates(
+      [...hiresBy.values()].flat().map((h) => h.id),
+      acceptedStages,
+      isHr ? undefined : db,
+    ),
+  ]);
 
   // Only HR can open a candidate; planning sees the name.
   const candidateName = (c: CandidateRow, className: string) =>
@@ -276,13 +278,12 @@ No openings are being hired for right now. Planning raises them from the Opening
           </header>
 
           {hires.map((joined) => {
-            const requiredBy = g.opening?.required_by ?? null;
-            const note = joined.joined_on
-              ? joiningNote(joined.joined_on, requiredBy)
-              : (expectedJoiningNote(joined.date_of_joining, requiredBy) ?? {
-                  text: "Offer accepted — joining date not set",
-                  tone: "warn" as const,
-                });
+            const notes = hireNotes({
+              offerAcceptedOn: offerDates.get(joined.id) ?? null,
+              joinedOn: joined.joined_on,
+              dateOfJoining: joined.date_of_joining,
+              requiredBy: g.opening?.required_by ?? null,
+            });
             return (
             <section
               key={joined.id}
@@ -295,7 +296,13 @@ No openings are being hired for right now. Planning raises them from the Opening
                   <span className="ml-2 text-ink-2">{joined.designation ?? "—"}</span>
                   <span className="ml-2 font-mono text-[11px] text-ink-3">{joined.candidate_code}</span>
                 </p>
-                {note && <Badge tone={note.tone}>{note.text}</Badge>}
+                <span className="flex flex-wrap items-center gap-1.5">
+                  {notes.map((n) => (
+                    <Badge key={n.text} tone={n.tone}>
+                      {n.text}
+                    </Badge>
+                  ))}
+                </span>
               </div>
               <p className="mt-1 mb-2 text-xs text-ink-2">
                 {joined.joined_on ? "Joined against this opening" : "Accepted the offer, still to join"} ·{" "}

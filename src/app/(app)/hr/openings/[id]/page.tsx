@@ -6,16 +6,15 @@ import { getHrContext } from "@/lib/hr/auth";
 import { OPENING_STATUS_LABEL, PRIORITY_LABEL, getStages, joiningStages } from "@/lib/hr/data";
 import {
   OPENING_STATUS_TONE as STATUS_TONE,
-  expectedJoiningNote,
   hiringSummary,
-  joiningNote,
+  hireNotes,
   statusTone,
   toIsoDay,
 } from "@/lib/hr/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OpeningStatusForm, TagCandidateForm } from "../../HrForms";
 import { Timeline, TimelineStrip } from "../../Timeline";
-import { buildTimelines, type CandidateRow } from "@/lib/hr/progress";
+import { buildTimelines, offerAcceptedDates, type CandidateRow } from "@/lib/hr/progress";
 
 export default async function OpeningPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -79,20 +78,31 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
         Number(!a.joined_on) - Number(!b.joined_on) ||
         (a.joined_on ?? toIsoDay(a.date_of_joining) ?? "9").localeCompare(b.joined_on ?? toIsoDay(b.date_of_joining) ?? "9"),
     );
-  const hireNote = (c: CandidateRow) =>
-    c.joined_on
-      ? joiningNote(c.joined_on, opening.required_by)
-      : (expectedJoiningNote(c.date_of_joining, opening.required_by) ?? {
-          text: "Offer accepted — joining date not set",
-          tone: "warn" as const,
-        });
   // Every tagged candidate's journey lives here — this is the page that tells
   // the whole story of the requirement.
-  const timelines = await buildTimelines(
-    candidates,
-    [{ ...opening, raised_by: opening.raised_by }],
-    access.hrStaff ? undefined : progressClient,
-  );
+  const [timelines, offerDates] = await Promise.all([
+    buildTimelines(candidates, [{ ...opening, raised_by: opening.raised_by }], access.hrStaff ? undefined : progressClient),
+    offerAcceptedDates(
+      hires.map((h) => h.id),
+      acceptedStages,
+      access.hrStaff ? undefined : progressClient,
+    ),
+  ]);
+  // Hiring (HR's part) and joining (the candidate's notice period) are judged
+  // separately — see hireNotes.
+  const notesFor = (c: CandidateRow) =>
+    hireNotes({
+      offerAcceptedOn: offerDates.get(c.id) ?? null,
+      joinedOn: c.joined_on,
+      dateOfJoining: c.date_of_joining,
+      requiredBy: opening.required_by,
+    });
+  const badges = (c: CandidateRow) =>
+    notesFor(c).map((n) => (
+      <Badge key={n.text} tone={n.tone}>
+        {n.text}
+      </Badge>
+    ));
 
   const facts: [string, string | null][] = [
     ["Site", opening.project ? `${opening.project.code} — ${opening.project.name}` : null],
@@ -122,11 +132,10 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
           {canSeeProgress && hires.length > 0 && (
             <ul className="mt-2 space-y-1 text-sm">
               {hires.map((h) => {
-                const note = hireNote(h);
                 return (
                   <li key={h.id} className="flex flex-wrap items-center gap-2">
                     <span className="font-medium text-ink">{h.name}</span>
-                    {note && <Badge tone={note.tone}>{note.text}</Badge>}
+                    {badges(h)}
                   </li>
                 );
               })}
@@ -179,7 +188,6 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
 
       {canSeeProgress &&
         hires.map((j) => {
-          const note = hireNote(j);
           return (
             <Card key={j.id} className="p-0">
               <details open className="group">
@@ -191,7 +199,7 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
                     </span>
                   </span>
                   <span className="flex items-center gap-2">
-                    {note && <Badge tone={note.tone}>{note.text}</Badge>}
+                    {badges(j)}
                     <span className="text-xs text-accent group-open:hidden">show</span>
                     <span className="hidden text-xs text-accent group-open:inline">hide</span>
                   </span>
@@ -227,11 +235,7 @@ export default async function OpeningPage({ params }: { params: Promise<{ id: st
                       <span className="ml-2 font-mono text-[11px] text-ink-3">{c.candidate_code}</span>
                     </span>
                     <span className="flex flex-wrap items-center gap-1.5">
-                      {!c.joined_on && expectedJoiningNote(c.date_of_joining, opening.required_by) && (
-                        <Badge tone={expectedJoiningNote(c.date_of_joining, opening.required_by)!.tone}>
-                          {expectedJoiningNote(c.date_of_joining, opening.required_by)!.text}
-                        </Badge>
-                      )}
+                      {hires.some((h) => h.id === c.id) && badges(c)}
                       {c.status && <Badge tone={statusTone(c.status)}>{c.status}</Badge>}
                     </span>
                   </div>
