@@ -119,7 +119,7 @@ export function forgetCachedToken() {
   cached = null;
 }
 
-async function graph<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function graph<T>(path: string, init: RequestInit = {}, retried = false): Promise<T> {
   const token = await accessToken();
   const res = await fetch(path.startsWith("http") ? path : `${GRAPH}${path}`, {
     ...init,
@@ -130,6 +130,13 @@ async function graph<T>(path: string, init: RequestInit = {}): Promise<T> {
     },
     cache: "no-store",
   });
+  // Microsoft can turn down a token before its stated expiry (account switched,
+  // sessions revoked, an instance waking up with an old one). Drop it, get a
+  // fresh one from the refresh token, and try once more.
+  if (res.status === 401 && !retried) {
+    cached = null;
+    return graph<T>(path, init, true);
+  }
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try {
@@ -166,34 +173,51 @@ export async function resolveShareUrl(url: string): Promise<DriveItem> {
 
 /** Short-lived embeddable preview URL (SharePoint / OneDrive for Business).
     Renders as the connected account, so it's only handed to signed-in users
-    who can already see the candidate. */
+    who can already see the candidate.
+
+    The share link is first turned into the file it points at, then the file
+    is previewed by its drive and item id. Asking for the preview through the
+    link itself fails for some links — notably the newer OneDrive links
+    (…/:b:/p/hr/IQ…) — even when the account owns the file. The
+    `redeemSharingLinkIfNecessary` hint lets Graph accept a company-wide link
+    the account hasn't opened before. */
 export async function previewUrl(url: string): Promise<string | null> {
-  const attempt = async (u: string) =>
-    (
-      await graph<{ getUrl?: string }>(`/shares/${shareId(u)}/driveItem/preview`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      })
-    ).getUrl ?? null;
+  const resolve = (u: string) =>
+    graph<DriveItem>(`/shares/${shareId(u)}/driveItem?$select=id,parentReference`, {
+      headers: { Prefer: "redeemSharingLinkIfNecessary" },
+    });
+  let item: DriveItem;
   try {
-    return await attempt(url);
+    item = await resolve(url);
   } catch (e) {
     // Share links copied from OneDrive carry a ?e=… tracking token that the
     // shares endpoint sometimes rejects; the bare link resolves the same file.
     const bare = url.split("?")[0];
     if (bare === url) throw e;
-    return attempt(bare);
+    item = await resolve(bare);
   }
+  const driveId = item.parentReference?.driveId;
+  if (!driveId) throw new Error("Microsoft Graph: the link resolved to a file with no drive.");
+  const r = await graph<{ getUrl?: string }>(`/drives/${driveId}/items/${item.id}/preview`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return r.getUrl ?? null;
 }
 
 /** Current saved copy of a file (the .xlsx itself). Used only to read cell
     hyperlinks, which the workbook range API doesn't return. */
 export async function downloadFile(driveId: string, itemId: string): Promise<ArrayBuffer> {
-  const token = await accessToken();
-  const res = await fetch(`${GRAPH}/drives/${driveId}/items/${itemId}/content`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
+  const get = async () =>
+    fetch(`${GRAPH}/drives/${driveId}/items/${itemId}/content`, {
+      headers: { Authorization: `Bearer ${await accessToken()}` },
+      cache: "no-store",
+    });
+  let res = await get();
+  if (res.status === 401) {
+    cached = null;
+    res = await get();
+  }
   if (!res.ok) throw new Error(`Microsoft Graph: download failed (${res.status})`);
   return res.arrayBuffer();
 }

@@ -44,16 +44,17 @@ async function resolveEmbed(url: string): Promise<ResumeEmbed> {
     try {
       return { src: await previewUrl(url) };
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (/permission|no longer exists|accessDenied|itemNotFound/i.test(msg)) {
-        // The connected account can't open this file (HR shared it with named
-        // people only). Fall back to SharePoint's own embed view, which loads
-        // with the *viewer's* Microsoft login instead of the app's.
+      const msg = (e instanceof Error ? e.message : String(e)).replace(/^Microsoft Graph:\s*/, "");
+      if (/permission|no longer exists|accessDenied|itemNotFound|not found|could not be found/i.test(msg)) {
+        // Graph couldn't open the file as the connected account. Fall back to
+        // SharePoint's own embed view, which loads with the *viewer's*
+        // Microsoft login — it only works if they are signed in to Microsoft
+        // in this browser and can open the file themselves.
         return {
           src: `${url}${url.includes("?") ? "&" : "?"}action=embedview`,
           note:
-            `Shown with your own Microsoft sign-in: the account connected in HR → Settings ` +
-            `(${conn.account_email ?? "unknown"}) doesn't have access to this file.`,
+            `Couldn't preview this through ${conn.account_email ?? "the connected account"} — Microsoft said: "${msg}". ` +
+            `Showing it with your own Microsoft sign-in instead; if it stays blank, use Open in OneDrive.`,
         };
       }
       return { src: null, error: msg };
