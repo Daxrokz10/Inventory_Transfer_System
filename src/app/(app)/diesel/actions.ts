@@ -94,9 +94,15 @@ export async function saveDailySheet(
   // the fuel is what the register/monthly report need to see debited.
   const { data: callerProfile } = await supabase
     .from("profiles")
-    .select("home_project_id")
+    .select("home_project_id, role")
     .eq("id", user.id)
     .single();
+  // A read-only viewer has no write access anywhere, their own site
+  // included — the database enforces this too (migration 0043), this is
+  // just a clearer message than an RLS failure.
+  if (callerProfile?.role === "viewer") {
+    return "Your account is read-only.";
+  }
   const projectId = callerProfile?.home_project_id;
   if (!projectId) {
     return "Your account isn't assigned to a site yet.";
@@ -270,6 +276,13 @@ export async function addFuelReceipt(
   const vendor = String(formData.get("vendor") ?? "").trim() || null;
   const note = String(formData.get("note") ?? "").trim() || null;
   const fuel_type = String(formData.get("fuel_type") ?? "diesel").trim();
+
+  const { data: receiptCaller } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+  if (receiptCaller?.role === "viewer") return "Your account is read-only.";
 
   if (!project_id) return "Missing site.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(receipt_date)) return "Pick a valid date.";

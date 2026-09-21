@@ -34,10 +34,32 @@ export const getAuthUser = cache(async (): Promise<AuthUser | null> => {
   }
 });
 
+export type UserRole = "superadmin" | "admin" | "supervisor" | "hr" | "viewer";
+
+/* Two different questions, deliberately separate:
+
+   canViewAll  — may this person see EVERY site's data (the admin view of
+                 each page, the cross-site reports, the registers)?
+   canWriteAll — may they change any of it?
+
+   They match for admin/superadmin. They diverge for "viewer", a read-only
+   account: same visibility, no write anywhere — not even at their own
+   site, since the database gives them no home site for write purposes
+   (migration 0043). Every page gates viewing on the first and every write
+   control on the second, so a viewer sees the same numbers with no way to
+   alter them. */
+export function canViewAll(role: string | null | undefined): boolean {
+  return role === "admin" || role === "superadmin" || role === "viewer";
+}
+
+export function canWriteAll(role: string | null | undefined): boolean {
+  return role === "admin" || role === "superadmin";
+}
+
 export type Profile = {
   id: string;
   full_name: string | null;
-  role: "superadmin" | "admin" | "supervisor" | "hr";
+  role: UserRole;
   home_project_id: string | null;
   can_inventory: boolean;
   can_diesel: boolean;

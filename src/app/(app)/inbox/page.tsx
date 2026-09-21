@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { getProfile } from "@/lib/auth";
+import { getProfile, canViewAll } from "@/lib/auth";
 
 export default async function InboxPage() {
   const supabase = await createClient();
 
   const profile = await getProfile();
 
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
   const homeProjectId = profile?.home_project_id ?? null;
 
   // Admins see all dispatched transfers; store managers see only transfers coming TO their site

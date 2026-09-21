@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createRequire } from "module";
 import { createClient } from "@/lib/supabase/server";
 import { selectAll } from "@/lib/supabase/selectAll";
-import { getProfile, getAccess } from "@/lib/auth";
+import { getProfile, getAccess, canViewAll, canWriteAll } from "@/lib/auth";
 
 const require = createRequire(import.meta.url);
 const XLSX = require("xlsx");
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
 
   const supabase = await createClient();
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
   const homeProjectId = profile?.home_project_id ?? null;
 
   // Page through: stock_balances exceeds PostgREST's 1000-row cap, and a

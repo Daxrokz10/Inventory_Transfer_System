@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { selectAll } from "@/lib/supabase/selectAll";
-import { getProfile } from "@/lib/auth";
+import { getProfile, canViewAll } from "@/lib/auth";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -40,7 +40,7 @@ export default async function DashboardPage() {
 
   const profile = await getProfile();
 
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
   const homeProjectId = profile?.home_project_id ?? null;
 
   // Store managers with no site assigned see nothing useful — handle gracefully

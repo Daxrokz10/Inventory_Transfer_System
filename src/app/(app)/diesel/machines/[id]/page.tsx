@@ -10,7 +10,7 @@ import { computeFillMetrics } from "@/lib/diesel/efficiency";
 import { EfficiencyChart, type EfficiencyPoint } from "../../EfficiencyChart";
 import { LogHistoryRow } from "./LogHistoryRow";
 import { SuspiciousControl } from "../MachineActions";
-import { getAuthUser, getProfile } from "@/lib/auth";
+import { getAuthUser, getProfile, canViewAll, canWriteAll } from "@/lib/auth";
 
 const SOLE_EDITOR_ID = "86091b08-3c52-4650-a55f-de1890e36415";
 
@@ -30,7 +30,8 @@ export default async function MachineDetailPage({
 
   const user = await getAuthUser();
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
+  const canWrite = canWriteAll(profile?.role);
   const canEdit = user?.id === SOLE_EDITOR_ID;
 
   // RLS already scopes this to admin-any-site or supervisor-own-site — a
@@ -173,9 +174,9 @@ export default async function MachineDetailPage({
               <StatusPill tone="ok">Normal</StatusPill>
             )}
           </div>
-          {isAdmin && (
+          {canWrite && (
             <div className="mt-2">
-              <SuspiciousControl machine={machine} isAdmin={isAdmin} />
+              <SuspiciousControl machine={machine} isAdmin={canWrite} />
             </div>
           )}
         </Card>

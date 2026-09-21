@@ -11,7 +11,7 @@ import { MachineActions, MeterBrokenControl } from "./MachineActions";
 import { MachineRequestButtons } from "./MachineRequestButtons";
 import { RemoveHiredMachineButton } from "./RemoveHiredMachineButton";
 import { MachinesToolbar } from "./MachinesToolbar";
-import { getProfile } from "@/lib/auth";
+import { getProfile, canViewAll, canWriteAll } from "@/lib/auth";
 
 type GroupBy = "site" | "type";
 
@@ -28,8 +28,13 @@ export default async function MachinesPage({
 
   const profile = await getProfile();
 
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
+  const canWrite = canWriteAll(profile?.role);
+  // A viewer sees every site (canViewAll) but acts nowhere — not even at
+  // the site on their profile, so write controls key off writeSite, which
+  // is null for them (mirrors my_home_project() in migration 0043).
   const homeProjectId = profile?.home_project_id ?? null;
+  const writeSite = profile?.role === "viewer" ? null : homeProjectId;
 
   // Extra sites a non-admin may register a NEW external machine at,
   // beyond their own — only populated when their site's group has opted
@@ -182,12 +187,12 @@ export default async function MachinesPage({
       />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {(isAdmin || homeProjectId) && (
+        {(canWrite || writeSite) && (
           <NewMachineButton
             sites={siteList}
-            homeProjectId={homeProjectId}
+            homeProjectId={writeSite}
             addableSites={addableSites}
-            isAdmin={isAdmin}
+            isAdmin={canWrite}
           />
         )}
         <MachinesToolbar
@@ -236,7 +241,8 @@ export default async function MachinesPage({
                   siteCode={siteCode}
                   siteList={siteList}
                   isAdmin={isAdmin}
-                  homeProjectId={homeProjectId}
+                  canWrite={canWrite}
+                  homeProjectId={writeSite}
                   pendingByMachine={pendingByMachine}
                   showSiteCol={showSiteCol}
                   showTypeCol={showTypeCol}
@@ -259,6 +265,7 @@ function GroupBlock({
   siteCode,
   siteList,
   isAdmin,
+  canWrite,
   homeProjectId,
   pendingByMachine,
   showSiteCol,
@@ -271,7 +278,11 @@ function GroupBlock({
   siteName: Map<string, string>;
   siteCode: Map<string, string | null>;
   siteList: { id: string; name: string; code: string | null }[];
+  /** May see every site's machines (admin, superadmin or viewer). */
   isAdmin: boolean;
+  /** May actually change them — false for a read-only viewer. */
+  canWrite: boolean;
+  /** The site this person may act at; null for an admin or a viewer. */
   homeProjectId: string | null;
   pendingByMachine: Map<string, "renewal" | "removal">;
   showSiteCol: boolean;
@@ -392,10 +403,12 @@ function GroupBlock({
             </TD>
             <TD>
               <div className="flex items-center gap-3">
-                {isAdmin ? (
-                  <MachineActions machine={m} isAdmin={isAdmin} sites={siteList} />
+                {canWrite ? (
+                  <MachineActions machine={m} isAdmin={canWrite} sites={siteList} />
                 ) : (
                   (() => {
+                    // Read-only viewer: nothing to act on at all.
+                    if (!homeProjectId) return <span className="text-xs text-ink-3">—</span>;
                     // SO renewal/removal requests stay tied to the
                     // machine's own site — a group grants shared
                     // visibility/fill-and-register reach, not the
@@ -428,7 +441,9 @@ function GroupBlock({
                     );
                   })()
                 )}
-                <MeterBrokenControl machine={m} isAdmin={isAdmin} />
+                {(canWrite || homeProjectId) && (
+                  <MeterBrokenControl machine={m} isAdmin={canWrite} />
+                )}
               </div>
             </TD>
           </TRow>

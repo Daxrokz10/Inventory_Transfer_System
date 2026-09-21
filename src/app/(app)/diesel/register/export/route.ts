@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { buildDieselRegister, registerToCsv } from "@/lib/diesel/register";
 import { monthRange } from "@/lib/diesel/monthlyReport";
-import { getAuthUser, getProfile, getAccess } from "@/lib/auth";
+import { getAuthUser, getProfile, getAccess, canViewAll } from "@/lib/auth";
 
 // CSV of a site's diesel register for a month — same columns as the manual
 // DIESEL_REG tab. RLS scopes the underlying reads to the caller's own site
@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
   if (!user) return new Response("Unauthorized", { status: 401 });
 
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
 
   const { searchParams } = new URL(req.url);
   const month = searchParams.get("month") ?? new Date().toISOString().slice(0, 7);

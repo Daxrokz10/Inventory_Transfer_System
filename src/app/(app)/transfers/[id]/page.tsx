@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ReceiveForm } from "./ReceiveForm";
 import { DeleteTransferForm } from "./DeleteTransferForm";
-import { getProfile } from "@/lib/auth";
+import { getProfile, canWriteAll } from "@/lib/auth";
 
 const statusStyles: Record<string, string> = {
   draft: "bg-surface-2 text-ink-2",
@@ -31,7 +31,7 @@ export default async function TransferDetailPage({
   const supabase = await createClient();
 
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const canWrite = canWriteAll(profile?.role);
 
   const { data: t } = await supabase
     .from("transfers")
@@ -44,7 +44,10 @@ export default async function TransferDetailPage({
   if (!t) notFound();
 
   // Only the receiving site's store manager (or an admin/superadmin) may confirm receipt.
-  const canReceive = isAdmin || profile?.home_project_id === t.to_project_id;
+  // A viewer's home site grants them nothing — read-only everywhere,
+  // including their own site (mirrors my_home_project() in migration 0043).
+  const canReceive =
+    canWrite || (profile?.role !== "viewer" && profile?.home_project_id === t.to_project_id);
 
   const { data: lines } = await supabase
     .from("transfer_lines")
@@ -96,7 +99,7 @@ export default async function TransferDetailPage({
           >
             {t.status}
           </span>
-          {isAdmin && (
+          {canWrite && (
             <DeleteTransferForm
               transferId={id}
               received={t.status === "received" || t.status === "partial"}

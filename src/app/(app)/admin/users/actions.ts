@@ -6,8 +6,11 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type CallerRole = "superadmin" | "admin" | "supervisor" | "hr" | null;
-type AssignableRole = "admin" | "supervisor";
-const ASSIGNABLE_ROLES: AssignableRole[] = ["admin", "supervisor"];
+type AssignableRole = "admin" | "supervisor" | "viewer";
+// "viewer" is read-only across every site — granting it can't give anything
+// away, so an admin may assign it without the superadmin gate that "admin"
+// carries.
+const ASSIGNABLE_ROLES: AssignableRole[] = ["admin", "supervisor", "viewer"];
 
 async function getCallerRole(): Promise<{
   supabase: Awaited<ReturnType<typeof createClient>>;

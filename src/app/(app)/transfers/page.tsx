@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getProfile } from "@/lib/auth";
 
 const statusStyles: Record<string, string> = {
   draft: "bg-surface-2 text-ink-2",
@@ -19,6 +20,8 @@ const statusLabel: Record<string, string> = {
 
 export default async function TransfersPage() {
   const supabase = await createClient();
+  // A read-only viewer sees the list but never the "new transfer" entry point.
+  const isViewer = (await getProfile())?.role === "viewer";
   const { data: transfers } = await supabase
     .from("transfers")
     .select(
@@ -31,12 +34,14 @@ export default async function TransfersPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Transfers</h1>
-        <Link
-          href="/transfers/new"
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-strong"
-        >
-          New transfer
-        </Link>
+        {!isViewer && (
+          <Link
+            href="/transfers/new"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-accent-strong"
+          >
+            New transfer
+          </Link>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-line bg-surface shadow-sm">

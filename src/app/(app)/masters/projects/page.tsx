@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { selectAll } from "@/lib/supabase/selectAll";
 import { canEditClosingBalance } from "./constants";
 import { EditableQtyCell } from "./EditableQtyCell";
-import { getAuthUser, getProfile } from "@/lib/auth";
+import { getAuthUser, getProfile, canViewAll, canWriteAll } from "@/lib/auth";
 
 const qty = (n: number) =>
   n === 0 ? "" : new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(n);
@@ -19,7 +19,8 @@ export default async function ClosingBalancePage({
 
   const user = await getAuthUser();
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
+  const canWrite = canWriteAll(profile?.role);
   const homeProjectId = profile?.home_project_id ?? null;
   // In-place quantity editing is limited to two specific accounts.
   const canEdit = canEditClosingBalance(user?.email);
@@ -106,7 +107,7 @@ export default async function ClosingBalancePage({
           <span className="text-sm text-ink-2">
             {rowItems.length} items × {siteCols.length} sites
           </span>
-          {isAdmin && (
+          {canWrite && (
             <a
               href="/masters/projects/adjustments"
               className="rounded-lg border border-line-strong px-4 py-2 text-sm font-medium text-ink-2 hover:bg-surface-2"

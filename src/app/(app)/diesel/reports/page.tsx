@@ -9,7 +9,7 @@ import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { fetchMonthlyReport, rowAverage, rowTotalRun } from "@/lib/diesel/monthlyReport";
 import { isLlmConfigured } from "@/lib/llm/client";
 import { AiSummary } from "./AiSummary";
-import { getProfile } from "@/lib/auth";
+import { getProfile, canViewAll } from "@/lib/auth";
 
 /* Governs the generateNarrative Server Action as well as this page's render —
    the model needs far longer than the platform's 10s default. */
@@ -31,7 +31,7 @@ export default async function DieselReportsPage({
   const supabase = await createClient();
 
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
   if (!isAdmin) redirect("/diesel");
 
   const today = new Date().toISOString().slice(0, 10);

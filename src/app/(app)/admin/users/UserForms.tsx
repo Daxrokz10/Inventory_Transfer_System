@@ -45,6 +45,7 @@ export function CreateUserForm({
           Role *
           <select name="role" defaultValue="supervisor" className={field}>
             <option value="supervisor">Store Manager</option>
+            <option value="viewer">Viewer (read-only, all sites)</option>
             {isSuperadmin && <option value="admin">Admin</option>}
           </select>
         </label>
@@ -136,6 +137,7 @@ export function ChangeRoleForm({
         className="rounded-lg border border-line-strong px-2 py-1.5 text-xs focus:outline-none"
       >
         <option value="supervisor">Store Manager</option>
+        <option value="viewer">Viewer (read-only, all sites)</option>
         {isSuperadmin && <option value="admin">Admin</option>}
       </select>
       {error && <span className="text-xs text-danger">{error}</span>}

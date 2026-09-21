@@ -7,7 +7,7 @@ import { Input, Select } from "@/components/ui/Field";
 import { Badge } from "@/components/ui/Badge";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { fetchSiteHistory, type SiteStay } from "@/lib/diesel/history";
-import { getAuthUser, getProfile } from "@/lib/auth";
+import { getAuthUser, getProfile, canViewAll } from "@/lib/auth";
 
 const SOURCE_LABEL: Record<SiteStay["source"], string> = {
   logged: "from fuel logs",
@@ -38,7 +38,7 @@ export default async function SiteHistoryPage({
   const user = await getAuthUser();
   if (!user) redirect("/login");
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
   if (!isAdmin) redirect("/diesel");
 
   const isMonth = (s?: string) => !!s && /^\d{4}-\d{2}$/.test(s);

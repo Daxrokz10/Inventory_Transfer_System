@@ -27,6 +27,8 @@ export default async function AppLayout({
       ? "Superadmin"
       : profile?.role === "admin"
         ? "Admin"
+        : profile?.role === "viewer"
+          ? "Viewer (read-only)"
         : profile?.can_inventory || profile?.can_diesel
           ? "Store Manager"
           : profile?.hr_staff

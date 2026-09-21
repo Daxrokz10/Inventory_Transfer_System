@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { resolveFlag } from "../actions";
 import { acknowledgeInsight } from "./actions";
-import { getProfile } from "@/lib/auth";
+import { getProfile, canViewAll, canWriteAll } from "@/lib/auth";
 
 const SEVERITY_TONE: Record<string, BadgeTone> = {
   low: "neutral",
@@ -23,7 +23,8 @@ export default async function AnomaliesPage() {
   const supabase = await createClient();
 
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
+  const canWrite = canWriteAll(profile?.role);
   if (!isAdmin) redirect("/diesel");
 
   const [
@@ -103,12 +104,14 @@ export default async function AnomaliesPage() {
                     {i.category.replace(/_/g, " ")} · {i.run_date}
                   </p>
                 </div>
-                <form action={acknowledgeInsight}>
-                  <input type="hidden" name="insight_id" value={i.id} />
-                  <Button variant="secondary" size="sm" type="submit">
-                    Acknowledge
-                  </Button>
-                </form>
+                {canWrite && (
+                  <form action={acknowledgeInsight}>
+                    <input type="hidden" name="insight_id" value={i.id} />
+                    <Button variant="secondary" size="sm" type="submit">
+                      Acknowledge
+                    </Button>
+                  </form>
+                )}
               </li>
             ))}
           </ul>
@@ -192,7 +195,7 @@ export default async function AnomaliesPage() {
                       )}
                     </TD>
                     <TD>
-                      {!f.resolved && (
+                      {!f.resolved && canWrite && (
                         <form action={resolveFlag}>
                           <input type="hidden" name="flag_id" value={f.id} />
                           <Button variant="secondary" size="sm" type="submit">

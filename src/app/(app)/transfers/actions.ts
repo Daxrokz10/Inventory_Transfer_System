@@ -104,7 +104,9 @@ export async function receiveTransfer(
   ]);
   if (!transfer) return "Transfer not found.";
   const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
-  const isReceiver = profile?.home_project_id === transfer.to_project_id;
+  // A viewer is read-only everywhere, their own site included.
+  const isReceiver =
+    profile?.role !== "viewer" && profile?.home_project_id === transfer.to_project_id;
   if (!isAdmin && !isReceiver) {
     return "Only the receiving site or an administrator can confirm receipt.";
   }

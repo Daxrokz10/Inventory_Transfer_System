@@ -9,11 +9,13 @@ function RoleBadge({ role }: { role: string }) {
     superadmin: "bg-danger-soft text-danger",
     admin: "bg-accent-soft text-accent-strong",
     supervisor: "bg-accent-soft text-accent-strong",
+    viewer: "bg-surface-2 text-ink-2",
   };
   const labels: Record<string, string> = {
     superadmin: "Superadmin",
     admin: "Admin",
     supervisor: "Store Manager",
+    viewer: "Viewer (read-only)",
   };
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${styles[role] ?? "bg-surface-2 text-ink-2"}`}>

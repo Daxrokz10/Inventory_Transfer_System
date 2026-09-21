@@ -73,6 +73,15 @@ const dieselAdminNav: NavItem[] = [
   { href: "/diesel/assistant", label: "Assistant" },
 ];
 
+/* A read-only viewer: every page an admin can look at, minus the ones
+   that only exist to change something (Purchase, Users, Sites) and the
+   AI Assistant, which bills per question. */
+const inventoryViewerNav: NavItem[] = [...inventorySupervisorNav];
+
+const dieselViewerNav: NavItem[] = dieselAdminNav.filter(
+  (i) => i.href !== "/diesel/sites" && i.href !== "/diesel/assistant",
+);
+
 const consoleNav: NavItem[] = [{ href: "/console", label: "Users & access" }];
 
 function hrNav(a: Access): NavItem[] {
@@ -97,9 +106,14 @@ function hrNav(a: Access): NavItem[] {
 
 export function navFor(module: ModuleKey, access: Access, role: string | null): NavItem[] {
   const isAdmin = role === "admin" || role === "superadmin";
+  const isViewer = role === "viewer";
   if (module === "console") return consoleNav;
   if (module === "hr") return hrNav(access);
-  if (module === "diesel") return isAdmin ? dieselAdminNav : dieselSupervisorNav;
+  if (module === "diesel") {
+    if (isViewer) return dieselViewerNav;
+    return isAdmin ? dieselAdminNav : dieselSupervisorNav;
+  }
+  if (isViewer) return inventoryViewerNav;
   return isAdmin ? inventoryAdminNav : inventorySupervisorNav;
 }
 

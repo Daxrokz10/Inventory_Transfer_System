@@ -2,12 +2,13 @@ import { createClient } from "@/lib/supabase/server";
 import { selectAll } from "@/lib/supabase/selectAll";
 import { NewItemButton } from "./ItemForm";
 import { ItemsTable } from "./ItemsTable";
-import { getProfile } from "@/lib/auth";
+import { getProfile, canViewAll, canWriteAll } from "@/lib/auth";
 
 export default async function ItemsPage() {
   const supabase = await createClient();
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
+  const canWrite = canWriteAll(profile?.role);
 
   const [{ data: items }, balances, { data: projects }] = await Promise.all([
     supabase
@@ -43,7 +44,7 @@ export default async function ItemsPage() {
         <span className="text-sm text-ink-2">{items?.length ?? 0} shown</span>
       </div>
 
-      {isAdmin && <NewItemButton />}
+      {canWrite && <NewItemButton />}
 
       <div className="overflow-x-auto rounded-lg border border-line bg-surface p-5 shadow-sm">
         {rows.length === 0 ? (
@@ -52,7 +53,7 @@ export default async function ItemsPage() {
             item master from your spreadsheets.
           </p>
         ) : (
-          <ItemsTable items={rows} isAdmin={isAdmin} />
+          <ItemsTable items={rows} isAdmin={canWrite} />
         )}
       </div>
     </div>

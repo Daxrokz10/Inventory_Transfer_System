@@ -16,7 +16,7 @@ import { MachineRequestButtons } from "./machines/MachineRequestButtons";
 import { RequestResolveControls } from "./machines/RequestResolveControls";
 import { EfficiencyChart, type EfficiencyPoint } from "./EfficiencyChart";
 import { resolveFlag, deleteFuelReceipt } from "./actions";
-import { getProfile } from "@/lib/auth";
+import { getProfile, canViewAll, canWriteAll } from "@/lib/auth";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -218,9 +218,12 @@ type PendingReqRow = {
 function PendingRequestsPanel({
   rows,
   siteNameById,
+  canWrite,
 }: {
   rows: PendingReqRow[];
   siteNameById: Map<string, string>;
+  /** Approve/reject controls are hidden from a read-only viewer. */
+  canWrite: boolean;
 }) {
   if (rows.length === 0) return null;
   return (
@@ -259,11 +262,13 @@ function PendingRequestsPanel({
                   {r.note ? ` — “${r.note}”` : ""}
                 </p>
               </div>
-              <RequestResolveControls
-                requestId={r.id}
-                type={r.type}
-                ownership={ownership}
-              />
+              {canWrite && (
+                <RequestResolveControls
+                  requestId={r.id}
+                  type={r.type}
+                  ownership={ownership}
+                />
+              )}
             </li>
           );
         })}
@@ -288,7 +293,8 @@ export default async function DieselPage({
   const supabase = await createClient();
   const profile = await getProfile();
 
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
+  const canWrite = canWriteAll(profile?.role);
   const homeProjectId = profile?.home_project_id ?? null;
 
   if (!isAdmin && !homeProjectId) {
@@ -724,6 +730,7 @@ export default async function DieselPage({
       <PendingRequestsPanel
         rows={(pendingReqRows ?? []) as unknown as PendingReqRow[]}
         siteNameById={new Map(projects.map((p) => [p.id, p.name]))}
+        canWrite={canWrite}
       />
 
       {/* Overstaying = past SO with no request filed. Machines that DO have
@@ -796,12 +803,14 @@ export default async function DieselPage({
                       · {log.log_date} — {f.message}
                     </span>
                   </div>
-                  <form action={resolveFlag}>
-                    <input type="hidden" name="flag_id" value={f.id} />
-                    <Button variant="secondary" size="sm" type="submit">
-                      Resolve
-                    </Button>
-                  </form>
+                  {canWrite && (
+                    <form action={resolveFlag}>
+                      <input type="hidden" name="flag_id" value={f.id} />
+                      <Button variant="secondary" size="sm" type="submit">
+                        Resolve
+                      </Button>
+                    </form>
+                  )}
                 </li>
               );
             })}

@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { fetchMonthlyReport, toCsv } from "@/lib/diesel/monthlyReport";
-import { getAuthUser, getProfile, getAccess } from "@/lib/auth";
+import { getAuthUser, getProfile, getAccess, canViewAll } from "@/lib/auth";
 
 // Admin-only CSV download of the monthly per-site, per-machine diesel
 // consumption report — same data as the /diesel/reports page, exported
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   if (!user) return new Response("Unauthorized", { status: 401 });
 
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
   if (!isAdmin) return new Response("Forbidden", { status: 403 });
 
   const { searchParams } = new URL(req.url);

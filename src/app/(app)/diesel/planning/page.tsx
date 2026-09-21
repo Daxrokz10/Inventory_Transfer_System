@@ -15,7 +15,7 @@ import {
 } from "@/lib/diesel/planning";
 import { RequirementForm } from "./RequirementForm";
 import { RequirementResolveControls } from "./RequirementResolveControls";
-import { getAuthUser, getProfile } from "@/lib/auth";
+import { getAuthUser, getProfile, canViewAll, canWriteAll } from "@/lib/auth";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -37,7 +37,8 @@ export default async function PlanningPage() {
   if (!user) redirect("/login");
 
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
+  const canWrite = canWriteAll(profile?.role);
   if (!isAdmin) redirect("/diesel");
 
   const [{ data: reqRaw }, { data: machinesRaw }, { data: sites }] = await Promise.all([
@@ -81,7 +82,7 @@ export default async function PlanningPage() {
         subtitle="Upcoming machine requirements, matched against the fleet's SO end dates and the rent-vs-buy cost table"
       />
 
-      <RequirementForm sites={siteList} />
+      {canWrite && <RequirementForm sites={siteList} />}
 
       <FleetOwnVsRentPanel rows={fleet} />
 

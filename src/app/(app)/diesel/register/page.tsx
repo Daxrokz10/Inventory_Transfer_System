@@ -9,7 +9,7 @@ import { Table, TH, TRow, TD, EmptyState } from "@/components/ui/Table";
 import { buildDieselRegister } from "@/lib/diesel/register";
 import { monthRange } from "@/lib/diesel/monthlyReport";
 import { OpeningStockForm } from "./OpeningStockForm";
-import { getProfile } from "@/lib/auth";
+import { getProfile, canViewAll, canWriteAll } from "@/lib/auth";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
@@ -24,7 +24,8 @@ export default async function DieselRegisterPage({
   const supabase = await createClient();
 
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
+  const canWrite = canWriteAll(profile?.role);
   const homeProjectId = profile?.home_project_id ?? null;
 
   const today = new Date().toISOString().slice(0, 10);
@@ -129,7 +130,7 @@ export default async function DieselRegisterPage({
         </form>
         {/* The opening count anchors diesel only — petrol has no physical
             barrel count, so its balance runs from recorded receipts alone. */}
-        {fuel === "diesel" && (
+        {fuel === "diesel" && canWrite && (
           <OpeningStockForm projectId={projectId} current={opening} today={today} />
         )}
       </div>

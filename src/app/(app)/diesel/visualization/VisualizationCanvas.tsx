@@ -75,9 +75,13 @@ function defaultPosition(key: string, index: number): Point {
 export function VisualizationCanvas({
   sites,
   machines: initialMachines,
+  canWrite = true,
 }: {
   sites: Site[];
   machines: Machine[];
+  /** Drag-to-relocate writes a transfer, so it's off for a read-only
+      viewer — panning, zooming and inspecting stay available. */
+  canWrite?: boolean;
 }) {
   const router = useRouter();
   const [machines, setMachines] = useState(initialMachines);
@@ -459,6 +463,7 @@ export function VisualizationCanvas({
       const moved = Math.hypot(e.clientX - p.startedAt.x, e.clientY - p.startedAt.y);
       const target = dropTargetAt(e.clientX, e.clientY);
       if (moved < 8 || !target || target.siteId === p.fromProjectId) return;
+      if (!canWrite) return;
 
       setError(null);
       const prevMachines = machines;

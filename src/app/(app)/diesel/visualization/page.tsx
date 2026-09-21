@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/ui/PageHeader";
 import type { Machine } from "@/lib/diesel/types";
 import { VisualizationCanvas } from "./VisualizationCanvas";
-import { getAuthUser, getProfile } from "@/lib/auth";
+import { getAuthUser, getProfile, canViewAll, canWriteAll } from "@/lib/auth";
 
 export default async function VisualizationPage() {
   const supabase = await createClient();
@@ -11,7 +11,8 @@ export default async function VisualizationPage() {
   if (!user) redirect("/login");
 
   const profile = await getProfile();
-  const isAdmin = profile?.role === "admin" || profile?.role === "superadmin";
+  const isAdmin = canViewAll(profile?.role);
+  const canWrite = canWriteAll(profile?.role);
   if (!isAdmin) redirect("/diesel");
 
   const [{ data: sites }, { data: machinesRaw }] = await Promise.all([
@@ -36,7 +37,7 @@ export default async function VisualizationPage() {
         title="Site Visualization"
         subtitle="Pan the canvas, zoom in/out, drag site boxes into place, and drop a machine onto another site to relocate it"
       />
-      <VisualizationCanvas sites={sitesWithMachines} machines={machines} />
+      <VisualizationCanvas sites={sitesWithMachines} machines={machines} canWrite={canWrite} />
     </div>
   );
 }
