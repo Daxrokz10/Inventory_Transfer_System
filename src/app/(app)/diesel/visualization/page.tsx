@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { selectAll } from "@/lib/supabase/selectAll";
 import { PageHeader } from "@/components/ui/PageHeader";
 import type { Machine } from "@/lib/diesel/types";
 import { VisualizationCanvas } from "./VisualizationCanvas";
@@ -15,16 +16,19 @@ export default async function VisualizationPage() {
   const canWrite = canWriteAll(profile?.role);
   if (!isAdmin) redirect("/diesel");
 
-  const [{ data: sites }, { data: machinesRaw }] = await Promise.all([
+  const [{ data: sites }, machinesRaw] = await Promise.all([
     supabase
       .from("projects")
       .select("id, name")
       .eq("is_active", true)
       .order("name"),
-    supabase.from("machines").select("*").eq("is_active", true).order("name"),
+    // Paged — the fleet is 330 machines today and this view wants all of them.
+    selectAll<Machine>(() =>
+      supabase.from("machines").select("*").eq("is_active", true).order("name"),
+    ),
   ]);
 
-  const machines = (machinesRaw ?? []) as Machine[];
+  const machines = machinesRaw as Machine[];
 
   // Only surface sites that actually have at least one machine — empty
   // sites just clutter the canvas.

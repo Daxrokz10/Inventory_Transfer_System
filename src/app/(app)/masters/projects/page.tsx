@@ -33,8 +33,10 @@ export default async function ClosingBalancePage({
     return !isAdmin && homeProjectId ? q.eq("project_id", homeProjectId) : q;
   });
 
-  const [{ data: items }, { data: projects }] = await Promise.all([
-    supabase.from("items").select("id, code, description, main_group, unit").order("code"),
+  const [items, { data: projects }] = await Promise.all([
+    selectAll<{ id: string; code: string; description: string; main_group: string | null; unit: string }>(
+      () => supabase.from("items").select("id, code, description, main_group, unit").order("code"),
+    ),
     supabase.from("projects").select("id, code, name").order("code"),
   ]);
 

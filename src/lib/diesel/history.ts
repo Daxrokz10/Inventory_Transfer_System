@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllRows } from "@/lib/supabase/selectAll";
 
 /* Where a machine was, month by month — built for the History page so an
    admin can ask "what was on site X in month Y" or "where has machine Z
@@ -69,21 +70,17 @@ export async function fetchSiteHistory(
 ): Promise<MachineSiteMonth[]> {
   // A month's fleet-wide logs run well past PostgREST's silent 1000-row
   // cap, so page through them rather than lose the month's tail.
-  async function fetchMonthLogs(): Promise<unknown[]> {
-    const all: unknown[] = [];
-    for (let page = 0; ; page++) {
-      const { data } = await supabase
+  const fetchMonthLogs = () =>
+    fetchAllRows<unknown>((from, to) =>
+      supabase
         .from("daily_logs")
         .select("machine_id, project_id, log_date")
         .gte("log_date", monthStart)
         .lte("log_date", monthEnd)
         .order("log_date", { ascending: true })
         .order("id", { ascending: true })
-        .range(page * 1000, page * 1000 + 999);
-      all.push(...(data ?? []));
-      if (!data || data.length < 1000) return all;
-    }
-  }
+        .range(from, to),
+    );
 
   const [{ data: machinesRaw }, logsRaw, { data: transfersRaw }, { data: allTransfersRaw }, { data: projectsRaw }] =
     await Promise.all([

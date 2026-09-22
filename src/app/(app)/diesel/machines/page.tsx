@@ -12,6 +12,7 @@ import { MachineRequestButtons } from "./MachineRequestButtons";
 import { RemoveHiredMachineButton } from "./RemoveHiredMachineButton";
 import { MachinesToolbar } from "./MachinesToolbar";
 import { getProfile, canViewAll, canWriteAll } from "@/lib/auth";
+import { fetchAllRows, selectAll } from "@/lib/supabase/selectAll";
 
 type GroupBy = "site" | "type";
 
@@ -71,9 +72,11 @@ export default async function MachinesPage({
   // filter here — RLS already scopes this to a supervisor's own site plus
   // whatever their group additionally grants (a shared internal fleet
   // always; shared external machines too when the group has opted in).
-  const machinesQuery = supabase.from("machines").select("*").eq("is_active", true).order("name");
+  const machinesQuery = selectAll<Machine>(() =>
+    supabase.from("machines").select("*").eq("is_active", true).order("name"),
+  );
 
-  const [{ data: machinesRaw }, { data: projects }, { data: reqRaw }, { data: recentLogsRaw }] =
+  const [machinesRaw, { data: projects }, { data: reqRaw }, recentLogsRaw] =
     await Promise.all([
       machinesQuery,
       supabase
@@ -85,13 +88,28 @@ export default async function MachinesPage({
         .from("machine_requests")
         .select("machine_id, type")
         .eq("status", "pending"),
-      supabase
-        .from("daily_logs")
-        .select("id, machine_id, log_date, opening_reading, closing_reading, fuel_issued_liters")
-        .gte("log_date", avgCutoff),
+      // 90 days across the whole fleet runs to a few thousand rows, well
+      // past PostgREST's 1000-row cap — paged, or the running averages
+      // below would be computed from an arbitrary partial slice.
+      fetchAllRows<{
+        id: string;
+        machine_id: string;
+        log_date: string;
+        opening_reading: number | null;
+        closing_reading: number | null;
+        fuel_issued_liters: number;
+      }>((from, to) =>
+        supabase
+          .from("daily_logs")
+          .select("id, machine_id, log_date, opening_reading, closing_reading, fuel_issued_liters")
+          .gte("log_date", avgCutoff)
+          .order("log_date", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to),
+      ),
     ]);
 
-  const machines = (machinesRaw ?? []) as Machine[];
+  const machines = machinesRaw as Machine[];
   const siteList = projects ?? [];
   const siteName = new Map(siteList.map((p) => [p.id, p.name]));
   const siteCode = new Map(siteList.map((p) => [p.id, p.code]));

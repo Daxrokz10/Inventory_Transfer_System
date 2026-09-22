@@ -32,3 +32,28 @@ export async function selectAll<T>(
   }
   return all;
 }
+
+/* Same job, different shape: a builder that takes (from, to) and whose data
+   is typed `unknown`. Needed where supabase-js types an embedded join
+   (`machines(...)`) as an array while PostgREST returns a single object for
+   a to-one relationship, which makes the row type unassignable to T.
+
+   ORDER MATTERS for both helpers: paging without a stable .order() can
+   repeat or skip rows between pages, so give the query a deterministic sort. */
+export async function fetchAllRows<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>,
+  pageSize = PAGE_SIZE,
+  maxPages = 50,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const from = page * pageSize;
+    const { data, error } = await build(from, from + pageSize - 1);
+    if (error) throw error;
+    const rows = (Array.isArray(data) ? data : []) as T[];
+    out.push(...rows);
+    if (rows.length < pageSize) return out;
+  }
+  console.warn(`fetchAllRows: hit the ${maxPages}-page cap, results may be partial`);
+  return out;
+}

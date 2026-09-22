@@ -8,22 +8,17 @@ import { cn } from "@/lib/cn";
 import { getHrContext } from "@/lib/hr/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OPENING_STATUS_LABEL, getStages, joiningStages } from "@/lib/hr/data";
-import {
-  OPENING_STATUS_TONE,
-  daysAgoIso,
-  hiringSummary,
-  hireNotes,
-  statusTone,
-  toIsoDay,
-} from "@/lib/hr/format";
+import { OPENING_STATUS_TONE, daysAgoIso, hireNotes, statusTone, toIsoDay } from "@/lib/hr/format";
 import { buildTimelines, offerAcceptedDates, type CandidateRow } from "@/lib/hr/progress";
 import { syncIfStale } from "@/lib/hr/sync";
 import { TimelineStrip } from "../Timeline";
 import { ScrollToCard } from "./ScrollToCard";
+import { DueChip, Funnel, HiringBar, Stat } from "./StatusParts";
 
-/* Status = one section per opening, each listing its candidates with the whole
-   journey on one line (registered → telephonic → rounds → offer / rejected).
-   Candidates HR added without an opening get a section of their own. */
+/* The status board, written to be understood at a glance: the totals first,
+   then one card per opening — who is hired, how the requirement is going, and
+   where its candidates stand. The candidate-by-candidate detail is folded away
+   behind "show candidates". */
 
 const PER_GROUP = 25;
 const RECENT_DAYS = 60;
@@ -87,12 +82,108 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
   const isRecentlyFilled = (o: OpeningRow) => o.status === "filled" && (!o.filled_at || o.filled_at >= recentSince);
   const openings = allOpenings
     .filter((o) => (sp.opening ? o.code === sp.opening : isLive(o) || isRecentlyFilled(o)))
-    // completed ones most recently filled first
     .sort((a, b) => (b.filled_at ?? "").localeCompare(a.filled_at ?? ""));
+
+  const stageOrder = new Map(stages.map((s, i) => [s.name, i]));
+  const kindOf = new Map(stages.map((s) => [s.name, s.kind]));
   const finishedStages = stages.filter((s) => s.kind === "success" || s.kind === "closed").map((s) => s.name);
   const closedStages = stages.filter((s) => s.kind === "closed").map((s) => s.name);
+  const closedSet = new Set(closedStages);
   const inList = (names: string[]) => `(${names.map((n) => `"${n}"`).join(",")})`;
+  const { accepted: acceptedStages, joined: joinedStage } = joiningStages(stages);
+  const openingIds = openings.map((o) => o.id);
 
+  /* ---- what each opening's candidates are doing, in counts ---- */
+  const { data: stageCounts } = openingIds.length
+    ? await createAdminClient().from("hr_opening_status_counts").select("opening_id, status, n").in("opening_id", openingIds)
+    : { data: [] as { opening_id: string; status: string | null; n: number }[] };
+  const countsBy = new Map<string, { byStatus: Map<string, number>; closed: number; inProcess: number; total: number }>();
+  for (const row of stageCounts ?? []) {
+    const c = countsBy.get(row.opening_id) ?? { byStatus: new Map<string, number>(), closed: 0, inProcess: 0, total: 0 };
+    const name = row.status ?? "";
+    c.byStatus.set(name, (c.byStatus.get(name) ?? 0) + row.n);
+    c.total += row.n;
+    const kind = row.status ? kindOf.get(row.status) : undefined;
+    if (kind === "closed") c.closed += row.n;
+    else if (kind !== "success") c.inProcess += row.n;
+    countsBy.set(row.opening_id, c);
+  }
+
+  /* ---- the pipeline, stage by stage ----
+     Steps are the stages that mean progress (a rejection ends the journey, it
+     isn't a step). "Reached" counts everyone whose status is that stage or any
+     later one, so someone rejected after the technical round still counts as
+     having reached it — the numbers fall exactly where people drop out. */
+  const funnelStages = stages.filter((st) => st.kind === "active" || st.kind === "success");
+  // The rejection stages that end a journey at each step: those sitting between
+  // this step and the next one in the stage order (Technical Rejection belongs
+  // to Tecnical Round). Anyone without a status who was rejected sits under
+  // "Registered".
+  const rejectionsFor = (stepOrder: number, nextOrder: number) =>
+    stages.filter((st) => st.kind === "closed" && (stageOrder.get(st.name) ?? 0) > stepOrder && (stageOrder.get(st.name) ?? 0) < nextOrder);
+
+  const funnelFor = (openingId: string, total: number) => {
+    const byStatus = countsBy.get(openingId)?.byStatus ?? new Map<string, number>();
+    const reachedFrom = (order: number) =>
+      [...byStatus.entries()].reduce((n, [name, count]) => n + ((stageOrder.get(name) ?? -1) >= order ? count : 0), 0);
+    const orders = funnelStages.map((st) => stageOrder.get(st.name) ?? 0);
+    const rejectedBetween = (from: number, to: number) =>
+      rejectionsFor(from, to).reduce((n, st) => n + (byStatus.get(st.name) ?? 0), 0);
+    return [
+      {
+        name: "Registered",
+        reached: total,
+        here: byStatus.get("") ?? 0,
+        rejected: rejectedBetween(-1, orders[0] ?? Number.MAX_SAFE_INTEGER),
+      },
+      ...funnelStages.map((st, i) => ({
+        name: st.name,
+        reached: reachedFrom(orders[i]),
+        here: byStatus.get(st.name) ?? 0,
+        rejected: rejectedBetween(orders[i], orders[i + 1] ?? Number.MAX_SAFE_INTEGER),
+        final: st.kind === "success",
+      })),
+    ];
+  };
+
+  /* ---- interviews still waiting on their interviewer ---- */
+  const { data: pendingRows } = openingIds.length
+    ? await db
+        .from("hr_interviews")
+        .select("id, candidate:candidate_id!inner(opening_id)")
+        .eq("state", "assigned")
+        .in("candidate.opening_id", openingIds)
+    : { data: [] as { id: string; candidate: { opening_id: string } | null }[] };
+  const awaitingBy = new Map<string, number>();
+  for (const r of (pendingRows ?? []) as unknown as { candidate: { opening_id: string } | null }[]) {
+    const id = r.candidate?.opening_id;
+    if (id) awaitingBy.set(id, (awaitingBy.get(id) ?? 0) + 1);
+  }
+
+  /* ---- everyone hired: joined, or offer accepted and waiting to join ---- */
+  const hireFilter = [
+    "joined_on.not.is.null",
+    "date_of_joining.not.is.null",
+    ...(acceptedStages.length ? [`status.in.${inList(acceptedStages)}`] : []),
+    ...(joinedStage ? [`status.eq."${joinedStage}"`] : []),
+  ].join(",");
+  const { data: hireRows } = openingIds.length
+    ? await db.from("hr_candidates").select(CANDIDATE_COLUMNS).in("opening_id", openingIds).or(hireFilter)
+    : { data: [] as CandidateRow[] };
+  const hiresBy = new Map<string, CandidateRow[]>();
+  // Someone who backed out (Rejected before joining, or any closed stage) is no
+  // longer a hire, even with a joining date still on file.
+  for (const r of (hireRows ?? []) as CandidateRow[]) {
+    if (r.opening_id && !(r.status && closedSet.has(r.status))) {
+      hiresBy.set(r.opening_id, [...(hiresBy.get(r.opening_id) ?? []), r]);
+    }
+  }
+  // Joined first (by date), then those still to join (by expected date).
+  const hireOrder = (a: CandidateRow, b: CandidateRow) =>
+    Number(!a.joined_on) - Number(!b.joined_on) ||
+    (a.joined_on ?? toIsoDay(a.date_of_joining) ?? "9").localeCompare(b.joined_on ?? toIsoDay(b.date_of_joining) ?? "9");
+
+  /* ---- the candidate lists behind "show candidates" ---- */
   const fetchGroup = async (openingId: string | null) => {
     let query = db
       .from("hr_candidates")
@@ -104,18 +195,15 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
     if (show === "active" && finishedStages.length) {
       query = query.or(`status.is.null,status.not.in.${inList(finishedStages)}`);
     }
-    if (show === "rejected" && closedStages.length) {
-      query = query.in("status", closedStages);
-    }
+    if (show === "rejected" && closedStages.length) query = query.in("status", closedStages);
     const { data, count } = await query;
     return { rows: (data ?? []) as CandidateRow[], total: count ?? 0 };
   };
 
-  // Order on the page: openings still hiring, candidates with no opening,
-  // then the openings completed recently.
+  // Order on the page: openings still hiring, candidates with no opening, then
+  // the openings completed recently.
   const groups: { opening: OpeningRow | null; rows: CandidateRow[]; total: number }[] = [];
   for (const o of openings.filter(isLive)) groups.push({ opening: o, ...(await fetchGroup(o.id)) });
-  // Candidates with no opening are HR's pool; planning only sees their own openings.
   if (!sp.opening && isHr) {
     const loose = await fetchGroup(null);
     if (loose.total > 0) groups.push({ opening: null, ...loose });
@@ -130,31 +218,6 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
     else if (!g) groups.unshift({ opening: null, rows: [focus], total: 1 });
   }
 
-  // Everyone hired against an opening — joined, or offer accepted and waiting
-  // to join — is always shown at the top of it, whatever the filter says: they
-  // are what the opening was raised for. Each carries their own date.
-  const openingIds = openings.map((o) => o.id);
-  const { accepted: acceptedStages } = joiningStages(stages);
-  const hireFilter = [
-    "joined_on.not.is.null",
-    "date_of_joining.not.is.null",
-    ...(acceptedStages.length ? [`status.in.${inList(acceptedStages)}`] : []),
-  ].join(",");
-  const { data: hireRows } = openingIds.length
-    ? await db.from("hr_candidates").select(CANDIDATE_COLUMNS).in("opening_id", openingIds).or(hireFilter)
-    : { data: [] as CandidateRow[] };
-  const hiresBy = new Map<string, CandidateRow[]>();
-  // Someone who backed out (Rejected before joining, or any closed stage) is no
-  // longer a hire, even with a joining date still on file.
-  const closedSet = new Set(closedStages);
-  for (const r of (hireRows ?? []) as CandidateRow[]) {
-    if (r.opening_id && !(r.status && closedSet.has(r.status))) hiresBy.set(r.opening_id, [...(hiresBy.get(r.opening_id) ?? []), r]);
-  }
-  // Joined first (by date), then those still to join (by expected date).
-  const hireOrder = (a: CandidateRow, b: CandidateRow) =>
-    Number(!a.joined_on) - Number(!b.joined_on) ||
-    (a.joined_on ?? toIsoDay(a.date_of_joining) ?? "9").localeCompare(b.joined_on ?? toIsoDay(b.date_of_joining) ?? "9");
-
   const [timelines, offerDates] = await Promise.all([
     buildTimelines([...groups.flatMap((g) => g.rows), ...[...hiresBy.values()].flat()], allOpenings, isHr ? undefined : db),
     offerAcceptedDates(
@@ -163,6 +226,21 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
       isHr ? undefined : db,
     ),
   ]);
+
+  /* ---- the numbers at the top ---- */
+  const live = openings.filter(isLive);
+  const allHires = [...hiresBy.entries()].filter(([id]) => live.some((o) => o.id === id)).flatMap(([, v]) => v);
+  const totals = {
+    openings: live.length,
+    needed: live.reduce((n, o) => n + Math.max(1, o.headcount), 0),
+    joined: allHires.filter((h) => h.joined_on).length,
+    toJoin: allHires.filter((h) => !h.joined_on).length,
+    inProcess: live.reduce((n, o) => n + (countsBy.get(o.id)?.inProcess ?? 0), 0),
+    overdue: live.filter((o) => {
+      const hires = hiresBy.get(o.id) ?? [];
+      return o.required_by && new Date(o.required_by) < new Date() && hires.length < Math.max(1, o.headcount);
+    }).length,
+  };
 
   // Only HR can open a candidate; planning sees the name.
   const candidateName = (c: CandidateRow, className: string) =>
@@ -177,11 +255,11 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Status"
+        title="Hiring status"
         subtitle={
           isHr
-            ? "Openings still being hired for, and how far each candidate has got."
-            : "The openings you raised, and how far each candidate has got."
+            ? "Where every open requirement stands today."
+            : "Where the requirements you raised stand today."
         }
         actions={
           isHr ? (
@@ -191,6 +269,19 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
           ) : undefined
         }
       />
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+        <Stat label="Hiring for" value={totals.openings} hint={`${totals.needed} ${totals.needed === 1 ? "person" : "people"} needed`} />
+        <Stat label="Joined" value={totals.joined} tone={totals.joined ? "good" : "plain"} hint="against these openings" />
+        <Stat label="Still to join" value={totals.toJoin} hint="offer accepted" />
+        <Stat label="In process" value={totals.inProcess} hint="candidates being interviewed" />
+        <Stat
+          label="Overdue"
+          value={totals.overdue}
+          tone={totals.overdue ? "danger" : "plain"}
+          hint="past the date needed"
+        />
+      </div>
 
       <form method="get" className="flex flex-wrap items-end gap-2">
         {sp.candidate && <input type="hidden" name="candidate" value={sp.candidate} />}
@@ -221,139 +312,186 @@ export default async function StatusPage({ searchParams }: { searchParams: Promi
       {groups.length === 0 && (
         <Card>
           <p className="text-sm text-ink-2">
-No openings are being hired for right now. Planning raises them from the Openings page; filled ones keep their
-            full timeline there, and candidates without an opening appear here too.
+            Nothing is being hired for right now. Planning raises requirements from the Openings page; filled ones keep
+            their full timeline there, and candidates without an opening appear here too.
           </p>
         </Card>
       )}
 
       {groups.map((g, gi) => {
-        const hires = [...((g.opening ? hiresBy.get(g.opening.id) : undefined) ?? [])].sort(hireOrder);
-        const hireIds = new Set(hires.map((j) => j.id));
+        const o = g.opening;
+        const hires = [...((o ? hiresBy.get(o.id) : undefined) ?? [])].sort(hireOrder);
+        const hireIds = new Set(hires.map((h) => h.id));
         const rest = g.rows.filter((c) => !hireIds.has(c.id));
-        const joinedCount = hires.filter((h) => h.joined_on).length;
+        const joined = hires.filter((h) => h.joined_on).length;
+        const needed = Math.max(1, o?.headcount ?? 1);
+        const stillToHire = Math.max(0, needed - hires.length);
+        const counts = o ? countsBy.get(o.id) : undefined;
+        const awaiting = o ? (awaitingBy.get(o.id) ?? 0) : 0;
+        const focusHere = Boolean(focus && g.rows.some((r) => r.id === focus.id));
+
         return (
-        <div key={g.opening?.id ?? "none"} className="space-y-3">
-        {gi === firstCompleted && (
-          <div className="pt-3">
-            <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-ink-3">Completed in the last 2 months</h2>
-            <p className="text-xs text-ink-3">Filled openings stay here for {RECENT_DAYS} days, then move to the Openings page.</p>
-          </div>
-        )}
-        <Card className="p-0">
-          <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-5 py-3">
-            {g.opening ? (
-              <div>
-                <Link href={`/hr/openings/${g.opening.id}`} className="font-semibold text-accent hover:underline">
-                  {g.opening.code} · {g.opening.designation}
-                </Link>
-                <p className="text-xs text-ink-2">
-                  {g.opening.project ? `${g.opening.project.code} · ` : ""}
-                  {hiringSummary(g.opening.headcount, joinedCount, hires.length - joinedCount)}{" "}
-                  · raised{" "}
-                  {new Date(g.opening.created_at).toLocaleDateString("en-IN", {
-                    day: "2-digit",
-                    month: "short",
-                    year: "numeric",
-                  })}
+          <div key={o?.id ?? "none"} className="space-y-3">
+            {gi === firstCompleted && (
+              <div className="pt-4">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.08em] text-ink-3">Completed recently</h2>
+                <p className="text-xs text-ink-3">
+                  Filled openings stay here for {RECENT_DAYS} days, then move to the Openings page.
                 </p>
               </div>
-            ) : (
-              <div>
-                <p className="font-semibold text-ink">Not linked to an opening</p>
-                <p className="text-xs text-ink-2">Candidates added without a requirement from planning</p>
-              </div>
             )}
-            <div className="flex items-center gap-2">
-              {g.opening && (
-                <Badge tone={OPENING_STATUS_TONE[g.opening.status]}>{OPENING_STATUS_LABEL[g.opening.status]}</Badge>
-              )}
-              <span className="text-xs text-ink-2">
-                {g.rows.length < g.total
-                  ? `${g.rows.length} of ${g.total.toLocaleString("en-IN")}`
-                  : g.total.toLocaleString("en-IN")}{" "}
-                candidate{g.total === 1 ? "" : "s"}
-              </span>
-            </div>
-          </header>
 
-          {hires.map((joined) => {
-            const notes = hireNotes({
-              offerAcceptedOn: offerDates.get(joined.id) ?? null,
-              joinedOn: joined.joined_on,
-              dateOfJoining: joined.date_of_joining,
-              requiredBy: g.opening?.required_by ?? null,
-            });
-            return (
-            <section
-              key={joined.id}
-              id={`cand-${joined.id}`}
-              className={cn("border-b border-line px-5 py-4", joined.joined_on ? "bg-good-soft/40" : "bg-accent-soft/30")}
-            >
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <p className="text-sm">
-                  {candidateName(joined, "font-semibold")}
-                  <span className="ml-2 text-ink-2">{joined.designation ?? "—"}</span>
-                  <span className="ml-2 font-mono text-[11px] text-ink-3">{joined.candidate_code}</span>
-                </p>
-                <span className="flex flex-wrap items-center gap-1.5">
-                  {notes.map((n) => (
-                    <Badge key={n.text} tone={n.tone}>
-                      {n.text}
-                    </Badge>
-                  ))}
-                </span>
-              </div>
-              <p className="mt-1 mb-2 text-xs text-ink-2">
-                {joined.joined_on ? "Joined against this opening" : "Accepted the offer, still to join"} ·{" "}
-                {g.opening && (
-                  <Link href={`/hr/openings/${g.opening.id}`} className="text-accent hover:underline">
-                    full timeline on the opening →
-                  </Link>
-                )}
-              </p>
-              <TimelineStrip events={timelines.get(joined.id) ?? []} />
-            </section>
-            );
-          })}
-
-          <ul className="divide-y divide-line">
-            {rest.length === 0 && hires.length === 0 && (
-              <li className="px-5 py-4 text-sm text-ink-2">No candidates for this filter.</li>
-            )}
-            {rest.map((c) => (
-              <li
-                key={c.id}
-                id={`cand-${c.id}`}
-                className={cn("space-y-2 px-5 py-4", c.id === focus?.id && "bg-accent-soft/40")}
-              >
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-sm">
-                    {candidateName(c, "font-medium")}
-                    <span className="ml-2 text-ink-2">{c.designation ?? "—"}</span>
-                    <span className="ml-2 font-mono text-[11px] text-ink-3">{c.candidate_code}</span>
+            <Card className="space-y-4 p-0">
+              {/* ---- headline ---- */}
+              <header className="flex flex-wrap items-start justify-between gap-3 px-5 pt-4">
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold tracking-tight text-ink">
+                    {o ? (
+                      <Link href={`/hr/openings/${o.id}`} className="hover:text-accent hover:underline">
+                        {o.designation} {needed > 1 && <span className="text-ink-2">× {needed}</span>}
+                      </Link>
+                    ) : (
+                      "Candidates without an opening"
+                    )}
+                  </h3>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2">
+                    {o ? (
+                      <>
+                        <span className="font-mono">{o.code}</span>
+                        {o.project && <span>· {o.project.code}</span>}
+                        <span>
+                          · raised{" "}
+                          {new Date(o.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                        </span>
+                        <DueChip requiredBy={o.required_by} done={!isLive(o)} />
+                      </>
+                    ) : (
+                      <span>Added by HR without a requirement from planning</span>
+                    )}
                   </p>
-                  {c.status ? <Badge tone={statusTone(c.status)}>{c.status}</Badge> : <Badge>No status</Badge>}
                 </div>
-                <TimelineStrip events={timelines.get(c.id) ?? []} />
-              </li>
-            ))}
-          </ul>
+                <div className="flex shrink-0 items-center gap-2">
+                  {o && <Badge tone={OPENING_STATUS_TONE[o.status]}>{OPENING_STATUS_LABEL[o.status]}</Badge>}
+                </div>
+              </header>
 
-          {g.rows.length < g.total && (
-            <div className="border-t border-line px-5 py-2.5">
-              <Link
-                href={
-                  !isHr && g.opening ? `/hr/openings/${g.opening.id}` : g.opening ? `/hr?opening=${g.opening.code}` : "/hr"
-                }
-                className="text-xs font-medium text-accent hover:underline"
-              >
-                See all {g.total.toLocaleString("en-IN")} {isHr ? "in the candidate list" : "on the opening"} →
-              </Link>
-            </div>
-          )}
-        </Card>
-        </div>
+              {/* ---- how the hiring is going ---- */}
+              {o && (
+                <div className="space-y-2 px-5">
+                  <HiringBar needed={needed} joined={joined} accepted={hires.length - joined} />
+                  <p className="text-sm text-ink-2">
+                    <span className="font-semibold text-ink">{joined}</span> joined
+                    {hires.length - joined > 0 && (
+                      <>
+                        {" · "}
+                        <span className="font-semibold text-ink">{hires.length - joined}</span> still to join
+                      </>
+                    )}
+                    {stillToHire > 0 && (
+                      <>
+                        {" · "}
+                        <span className="font-semibold text-ink">{stillToHire}</span> still to hire
+                      </>
+                    )}
+                    {" of "}
+                    {needed}
+                  </p>
+                </div>
+              )}
+
+              {/* ---- the people hired ---- */}
+              {hires.length > 0 && (
+                <ul className="divide-y divide-line border-y border-line">
+                  {hires.map((h) => {
+                    const notes = hireNotes({
+                      offerAcceptedOn: offerDates.get(h.id) ?? null,
+                      joinedOn: h.joined_on,
+                      dateOfJoining: h.date_of_joining,
+                      requiredBy: o?.required_by ?? null,
+                    });
+                    return (
+                      <li
+                        key={h.id}
+                        id={`cand-${h.id}`}
+                        className={cn("flex flex-wrap items-center gap-x-3 gap-y-1.5 px-5 py-3", h.joined_on ? "bg-good-soft/30" : "bg-accent-soft/20")}
+                      >
+                        <span className="text-sm">
+                          {candidateName(h, "font-semibold")}
+                          <span className="ml-2 text-ink-2">{h.designation ?? "—"}</span>
+                        </span>
+                        <span className="ml-auto flex flex-wrap items-center gap-1.5">
+                          {notes.map((n) => (
+                            <Badge key={n.text} tone={n.tone}>
+                              {n.text}
+                            </Badge>
+                          ))}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+
+              {/* ---- the pipeline ---- */}
+              {o && (
+                <div className="space-y-1.5 px-5">
+                  <Funnel steps={funnelFor(o.id, counts?.total ?? 0)} />
+                  <p className="text-xs text-ink-2">
+                    {awaiting > 0 && (
+                      <span className="font-medium text-warn">
+                        {awaiting} interview{awaiting === 1 ? "" : "s"} awaiting feedback
+                      </span>
+                    )}
+                    {awaiting > 0 && (counts?.closed ?? 0) > 0 && " · "}
+                    {(counts?.closed ?? 0) > 0 && `${counts?.closed} rejected in total`}
+                    {awaiting === 0 && !(counts?.closed ?? 0) && (counts?.total ? "No one rejected so far" : "No candidates tagged yet")}
+                  </p>
+                </div>
+              )}
+
+              {/* ---- the detail, folded away ---- */}
+              <details open={focusHere} className="group border-t border-line">
+                <summary className="cursor-pointer list-none px-5 py-2.5 text-xs font-medium text-accent hover:bg-surface-2">
+                  <span className="group-open:hidden">
+                    Show candidates{g.total ? ` (${g.total.toLocaleString("en-IN")})` : ""} ▾
+                  </span>
+                  <span className="hidden group-open:inline">Hide candidates ▴</span>
+                </summary>
+                <ul className="divide-y divide-line border-t border-line">
+                  {rest.length === 0 && (
+                    <li className="px-5 py-4 text-sm text-ink-2">No other candidates for this filter.</li>
+                  )}
+                  {rest.map((c) => (
+                    <li
+                      key={c.id}
+                      id={`cand-${c.id}`}
+                      className={cn("space-y-2 px-5 py-3.5", c.id === focus?.id && "bg-accent-soft/40")}
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <p className="text-sm">
+                          {candidateName(c, "font-medium")}
+                          <span className="ml-2 text-ink-2">{c.designation ?? "—"}</span>
+                          <span className="ml-2 font-mono text-[11px] text-ink-3">{c.candidate_code}</span>
+                        </p>
+                        {c.status ? <Badge tone={statusTone(c.status)}>{c.status}</Badge> : <Badge>No status</Badge>}
+                      </div>
+                      <TimelineStrip events={timelines.get(c.id) ?? []} />
+                    </li>
+                  ))}
+                  {g.rows.length < g.total && (
+                    <li className="px-5 py-2.5">
+                      <Link
+                        href={!isHr && o ? `/hr/openings/${o.id}` : o ? `/hr?opening=${o.code}` : "/hr"}
+                        className="text-xs font-medium text-accent hover:underline"
+                      >
+                        See all {g.total.toLocaleString("en-IN")} {isHr ? "in the candidate list" : "on the opening"} →
+                      </Link>
+                    </li>
+                  )}
+                </ul>
+              </details>
+            </Card>
+          </div>
         );
       })}
 

@@ -78,7 +78,9 @@ export default async function DashboardPage() {
     supabase.from("items").select("*", { count: "exact", head: true }),
     inTransitQuery,
     balancesQuery,
-    supabase.from("items").select("id, per_day_rate, main_group"),
+    selectAll<{ id: string; per_day_rate: number | null; main_group: string | null }>(() =>
+      supabase.from("items").select("id, per_day_rate, main_group").order("id"),
+    ),
     isAdmin
       ? supabase.from("projects").select("id, code, name")
       : homeProjectId
@@ -87,7 +89,7 @@ export default async function DashboardPage() {
   ]);
 
   const itemInfo = new Map(
-    (itemsRes.data ?? []).map((i) => [
+    itemsRes.map((i) => [
       i.id,
       { rate: Number(i.per_day_rate ?? 0), group: i.main_group ?? "Other" },
     ]),

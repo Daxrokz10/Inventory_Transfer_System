@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useMemo, useRef, useState } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { Field, Input, Select, Textarea } from "@/components/ui/Field";
 import { FIELD_LABELS } from "@/lib/hr/sheet";
@@ -633,20 +633,118 @@ export function OpeningStatusForm({ id, status }: { id: string; status: string }
   );
 }
 
+type CandidateHit = {
+  id: string;
+  candidate_code: string;
+  name: string;
+  designation: string | null;
+  phone: string | null;
+  status: string | null;
+  opening_code: string | null;
+};
+
+/** Find a candidate by name (or phone, or ID) and tag them to this opening.
+    The list comes from the server as you type — there are thousands of
+    candidates, so nothing is loaded up front. */
 export function TagCandidateForm({ openingCode }: { openingCode: string }) {
+  const [q, setQ] = useState("");
+  const [hits, setHits] = useState<CandidateHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState<CandidateHit | null>(null);
   const [error, action, pending] = useActionState(async (prev: string | null, fd: FormData) => {
     const r = await tagCandidateToOpening(prev, fd);
-    if (!r) (document.getElementById("tag-candidate") as HTMLFormElement | null)?.reset();
+    if (!r) {
+      setPicked(null);
+      setQ("");
+      setHits([]);
+    }
     return r;
   }, null);
+
+  useEffect(() => {
+    const term = q.trim();
+    const cancel = new AbortController();
+    const t = setTimeout(async () => {
+      if (picked || term.length < 2) {
+        setHits([]);
+        return;
+      }
+      setSearching(true);
+      try {
+        const res = await fetch(`/api/hr/candidates/search?q=${encodeURIComponent(term)}`, { signal: cancel.signal });
+        const json = (await res.json()) as { items?: CandidateHit[] };
+        setHits(json.items ?? []);
+      } catch {
+        // typing again, or offline
+      } finally {
+        setSearching(false);
+      }
+    }, 250);
+    return () => {
+      clearTimeout(t);
+      cancel.abort();
+    };
+  }, [q, picked]);
+
   return (
-    <form id="tag-candidate" action={action} className="flex flex-wrap items-center gap-2">
+    <form action={action} onKeyDown={blockEnter} className="space-y-2">
       <input type="hidden" name="opening_code" value={openingCode} />
-      <Input name="candidate_code" placeholder="Candidate ID, e.g. CAND-0123" required />
-      <Button type="submit" size="sm" disabled={pending}>
-        {pending ? "Tagging…" : "Tag candidate"}
-      </Button>
-      {error && <span className="text-xs text-danger">{error}</span>}
+      <input type="hidden" name="candidate_code" value={picked?.candidate_code ?? ""} />
+
+      {picked ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-inset px-3 py-2 text-sm">
+          <span className="font-medium text-ink">{picked.name}</span>
+          <span className="text-ink-2">{picked.designation ?? "—"}</span>
+          <span className="font-mono text-[11px] text-ink-3">{picked.candidate_code}</span>
+          <button
+            type="button"
+            onClick={() => setPicked(null)}
+            className="ml-auto text-xs font-medium text-accent hover:underline"
+          >
+            Change
+          </button>
+        </div>
+      ) : (
+        <>
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, phone or ID…" autoComplete="off" />
+          {q.trim().length >= 2 && (
+            <div className="max-h-56 overflow-y-auto rounded-md border border-line">
+              {searching && hits.length === 0 && <p className="px-3 py-2 text-xs text-ink-3">Searching…</p>}
+              {!searching && hits.length === 0 && <p className="px-3 py-2 text-xs text-ink-3">No candidate matches that.</p>}
+              {hits.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setPicked(c)}
+                  className="block w-full px-3 py-2 text-left text-sm hover:bg-surface-2"
+                >
+                  <span className="font-medium text-ink">{c.name}</span>
+                  <span className="ml-2 text-ink-2">{c.designation ?? "—"}</span>
+                  <span className="block text-[11px] text-ink-3">
+                    {c.candidate_code}
+                    {c.phone ? ` · ${c.phone}` : ""}
+                    {c.status ? ` · ${c.status}` : ""}
+                    {c.opening_code && c.opening_code !== openingCode ? ` · already on ${c.opening_code}` : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {picked?.opening_code && picked.opening_code !== openingCode && (
+        <p className="rounded-md bg-warn-soft px-3 py-2 text-xs text-warn">
+          {picked.name} is tagged to {picked.opening_code}. Tagging moves them to {openingCode}.
+        </p>
+      )}
+
+      <div className="flex items-center gap-2">
+        <Button type="submit" size="sm" disabled={pending || !picked}>
+          {pending ? "Tagging…" : "Tag candidate"}
+        </Button>
+        {error && <span className="text-xs text-danger">{error}</span>}
+      </div>
     </form>
   );
 }

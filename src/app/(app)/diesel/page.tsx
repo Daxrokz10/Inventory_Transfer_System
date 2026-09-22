@@ -17,6 +17,7 @@ import { RequestResolveControls } from "./machines/RequestResolveControls";
 import { EfficiencyChart, type EfficiencyPoint } from "./EfficiencyChart";
 import { resolveFlag, deleteFuelReceipt } from "./actions";
 import { getProfile, canViewAll, canWriteAll } from "@/lib/auth";
+import { selectAll } from "@/lib/supabase/selectAll";
 
 const inr = (n: number) =>
   new Intl.NumberFormat("en-IN", {
@@ -316,20 +317,25 @@ export default async function DieselPage({
   // Machines that ask for fuel OR just a reading (e.g. a batching plant's
   // hours) belong on the daily report; pure fixtures with neither (tower
   // cranes, silos, office cars) live only on the Machinery page.
-  const machinesQuery = supabase
-    .from("machines")
-    .select("*")
-    .eq("is_active", true)
-    .or("track_fuel.eq.true,track_meter.eq.true")
-    .order("name");
+  const machinesQuery = selectAll<Machine>(() => {
+    const q = supabase
+      .from("machines")
+      .select("*")
+      .eq("is_active", true)
+      .or("track_fuel.eq.true,track_meter.eq.true")
+      .order("name");
+    // Admin narrows to one chosen site; see the note below on why a
+    // supervisor needs no filter here.
+    return isAdmin && siteFilter ? q.eq("project_id", siteFilter) : q;
+  });
   // Admin narrows to one chosen site via the dropdown. A supervisor gets
   // no explicit filter here — RLS naturally returns their own site's
   // machines plus any INTERNAL machine belonging to another site in their
   // group (a shared fleet); external machines never leave their own site,
   // so they're unaffected either way.
-  if (isAdmin && siteFilter) machinesQuery.eq("project_id", siteFilter);
 
-  const [{ data: machinesRaw }, projectsRes, siteRes] = await Promise.all([
+
+  const [machinesRaw, projectsRes, siteRes] = await Promise.all([
     machinesQuery,
     isAdmin
       ? supabase.from("projects").select("id, name, code, state").eq("is_active", true).order("name")
@@ -339,7 +345,7 @@ export default async function DieselPage({
       : Promise.resolve({ data: null }),
   ]);
 
-  const machines = (machinesRaw ?? []) as Machine[];
+  const machines = machinesRaw as Machine[];
   const projects = (projectsRes.data ?? []) as { id: string; name: string; code: string | null; state: string | null }[];
   const site = siteRes.data as { id: string; name: string; state: string | null } | null;
   const siteCity = cityForState(site?.state ?? null);
@@ -347,12 +353,17 @@ export default async function DieselPage({
   // SO / deployment-deadline status across ALL active machines at the
   // relevant site(s) — including non-fuel assets, which the machines query
   // above excludes. This drives the "past their SO duration" alert.
-  const soQuery = supabase
-    .from("machines")
-    .select("id, name, so_until, project_id, ownership")
-    .eq("is_active", true)
-    .not("so_until", "is", null);
-  if (siteFilter) soQuery.eq("project_id", siteFilter);
+  const soQuery = selectAll<Pick<Machine, "id" | "name" | "so_until" | "project_id" | "ownership">>(
+    () => {
+      const q = supabase
+        .from("machines")
+        .select("id, name, so_until, project_id, ownership")
+        .eq("is_active", true)
+        .not("so_until", "is", null)
+        .order("id");
+      return siteFilter ? q.eq("project_id", siteFilter) : q;
+    },
+  );
 
   const pendingReqQuery = supabase
     .from("machine_requests")
@@ -360,12 +371,12 @@ export default async function DieselPage({
     .eq("status", "pending");
   if (siteFilter) pendingReqQuery.eq("project_id", siteFilter);
 
-  const [{ data: soRaw }, { data: pendingReqRaw }] = await Promise.all([
+  const [soRaw, { data: pendingReqRaw }] = await Promise.all([
     soQuery,
     pendingReqQuery,
   ]);
 
-  const soMachines = (soRaw ?? []) as Pick<
+  const soMachines = soRaw as Pick<
     Machine,
     "id" | "name" | "so_until" | "project_id" | "ownership"
   >[];

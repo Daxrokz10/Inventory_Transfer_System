@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { selectAll } from "@/lib/supabase/selectAll";
 import { PurchaseForm } from "./PurchaseForm";
 import { PURCHASE_CODE } from "./constants";
 import { getAuthUser, getProfile } from "@/lib/auth";
@@ -13,11 +14,14 @@ export default async function PurchasesPage() {
   const role = profile?.role ?? null;
   if (role !== "admin" && role !== "superadmin") redirect("/dashboard");
 
-  const [{ data: items }, { data: projects }] = await Promise.all([
-    supabase
-      .from("items")
-      .select("id, code, description, unit, sub_group, per_day_rate")
-      .order("code"),
+  const [items, { data: projects }] = await Promise.all([
+    selectAll<{ id: string; code: string; description: string; unit: string; sub_group: string | null; per_day_rate: number | null }>(
+      () =>
+        supabase
+          .from("items")
+          .select("id, code, description, unit, sub_group, per_day_rate")
+          .order("code"),
+    ),
     supabase.from("projects").select("id, code, name, is_active").order("code"),
   ]);
 

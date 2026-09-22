@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllRows } from "@/lib/supabase/selectAll";
 
 /* The daily review's checks.
 
@@ -64,24 +65,6 @@ const num = (n: number, dp = 1) =>
    because supabase-js types an embedded join (`daily_logs!inner(...)`) as an
    array while PostgREST returns a single object for a to-one relationship —
    the same mismatch anomalies/page.tsx casts around. */
-async function fetchAllRows<T>(
-  build: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>,
-  pageSize = 1000,
-  maxPages = 50,
-): Promise<T[]> {
-  const out: T[] = [];
-  for (let page = 0; page < maxPages; page++) {
-    const from = page * pageSize;
-    const { data, error } = await build(from, from + pageSize - 1);
-    if (error) throw error;
-    const rows = (Array.isArray(data) ? data : []) as T[];
-    out.push(...rows);
-    if (rows.length < pageSize) return out;
-  }
-  console.warn("Monitor: hit page cap, results may be partial");
-  return out;
-}
-
 export async function runMonitorChecks(
   admin: SupabaseClient,
   today: string,
@@ -292,13 +275,24 @@ async function checkIdleHiredMachines(
 ): Promise<InsightFact[]> {
   const cutoff = shiftDate(today, -IDLE_DAYS);
 
-  const { data: machinesRaw, error } = await admin
-    .from("machines")
-    .select("id, name, registration_no, project_id, monthly_rent, deployed_at, vendor_name")
-    .eq("ownership", "external")
-    .eq("is_active", true)
-    .eq("track_fuel", true);
-  if (error) throw error;
+  const machinesRaw = await fetchAllRows<{
+    id: string;
+    name: string;
+    registration_no: string | null;
+    project_id: string;
+    monthly_rent: number | null;
+    deployed_at: string | null;
+    vendor_name: string | null;
+  }>((from, to) =>
+    admin
+      .from("machines")
+      .select("id, name, registration_no, project_id, monthly_rent, deployed_at, vendor_name")
+      .eq("ownership", "external")
+      .eq("is_active", true)
+      .eq("track_fuel", true)
+      .order("id")
+      .range(from, to),
+  );
 
   const candidates = ((machinesRaw ?? []) as {
     id: string;

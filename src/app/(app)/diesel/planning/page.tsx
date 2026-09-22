@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { selectAll } from "@/lib/supabase/selectAll";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
@@ -41,12 +42,12 @@ export default async function PlanningPage() {
   const canWrite = canWriteAll(profile?.role);
   if (!isAdmin) redirect("/diesel");
 
-  const [{ data: reqRaw }, { data: machinesRaw }, { data: sites }] = await Promise.all([
+  const [{ data: reqRaw }, machinesRaw, { data: sites }] = await Promise.all([
     supabase
       .from("site_requirements")
       .select("*")
       .order("needed_from", { ascending: true }),
-    supabase.from("machines").select("*"),
+    selectAll<Machine>(() => supabase.from("machines").select("*").order("id")),
     supabase
       .from("projects")
       .select("id, name, code, state, city")

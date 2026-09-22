@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllRows } from "@/lib/supabase/selectAll";
 
 /* Monthly diesel-consumption report — one row per machine, summed over a
    calendar month, grouped by site. Built for the admin's monthly
@@ -78,41 +79,49 @@ export async function fetchMonthlyReport(
     total_cost: number | null;
     fuel_source: "shraddha" | "outside" | null;
   };
-  const PAGE_SIZE = 1000;
-  const logs: LogRow[] = [];
-  for (let page = 0; ; page++) {
-    let query = supabase
+  const logs = await fetchAllRows<LogRow>((from, to) => {
+    const query = supabase
       .from("daily_logs")
       .select("machine_id, project_id, log_date, opening_reading, closing_reading, fuel_issued_liters, total_cost, fuel_source")
       .gte("log_date", start)
       .lte("log_date", end)
       .order("log_date", { ascending: true })
-      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
-    if (siteFilter) query = query.eq("project_id", siteFilter);
-    const { data: pageRows } = await query;
-    logs.push(...((pageRows ?? []) as LogRow[]));
-    if (!pageRows || pageRows.length < PAGE_SIZE) break;
-  }
+      .order("id", { ascending: true })
+      .range(from, to);
+    return siteFilter ? query.eq("project_id", siteFilter) : query;
+  });
   if (logs.length === 0) return [];
 
   const machineIds = [...new Set(logs.map((l) => l.machine_id))];
   const projectIds = [...new Set(logs.map((l) => l.project_id))];
 
-  const [{ data: machinesRaw }, { data: projectsRaw }] = await Promise.all([
-    supabase
-      .from("machines")
-      .select("id, name, registration_no, reading_type, fuel_type")
-      .in("id", machineIds),
-    supabase.from("projects").select("id, name, code").in("id", projectIds),
+  const [machinesRaw, projectsRaw] = await Promise.all([
+    fetchAllRows<{
+      id: string;
+      name: string;
+      registration_no: string | null;
+      reading_type: "km" | "hours";
+      fuel_type: "diesel" | "petrol";
+    }>((from, to) =>
+      supabase
+        .from("machines")
+        .select("id, name, registration_no, reading_type, fuel_type")
+        .in("id", machineIds)
+        .order("id")
+        .range(from, to),
+    ),
+    fetchAllRows<{ id: string; name: string; code: string | null }>((from, to) =>
+      supabase.from("projects").select("id, name, code").in("id", projectIds).order("id").range(from, to),
+    ),
   ]);
   const machineById = new Map(
-    (machinesRaw ?? []).map((m) => [
+    machinesRaw.map((m) => [
       m.id as string,
       m as { name: string; registration_no: string | null; reading_type: "km" | "hours"; fuel_type: "diesel" | "petrol" },
     ]),
   );
   const projectById = new Map(
-    (projectsRaw ?? []).map((p) => [p.id as string, p as { name: string; code: string | null }]),
+    projectsRaw.map((p) => [p.id as string, p as { name: string; code: string | null }]),
   );
 
   const grouped = new Map<string, MonthlyReportRow>();

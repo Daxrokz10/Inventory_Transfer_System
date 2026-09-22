@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllRows } from "@/lib/supabase/selectAll";
 
 /* Diesel register — the site's running barrel-stock ledger, merging the two
    sides we already record into one chronological stream:
@@ -96,12 +97,27 @@ export async function buildDieselRegister(
   // listed. INWARD — barrels received. This ledger is diesel-only — a
   // petrol receipt is a separate fuel stock and would otherwise silently
   // inflate this balance.
-  const { data: receiptsRaw } = await supabase
-    .from("fuel_receipts")
-    .select("receipt_date, liters, rate_per_liter, total_cost, vendor, note")
-    .eq("project_id", projectId)
-    .eq("fuel_type", fuel)
-    .lte("receipt_date", range.end);
+  // Paged: this is a site's entire delivery history, which grows without
+  // bound — past 1000 rows an unpaged query silently drops the rest and
+  // the opening balance starts from an incomplete history.
+  const receiptsRaw = await fetchAllRows<{
+    receipt_date: string;
+    liters: number;
+    rate_per_liter: number | null;
+    total_cost: number | null;
+    vendor: string | null;
+    note: string | null;
+  }>((from, to) =>
+    supabase
+      .from("fuel_receipts")
+      .select("receipt_date, liters, rate_per_liter, total_cost, vendor, note")
+      .eq("project_id", projectId)
+      .eq("fuel_type", fuel)
+      .lte("receipt_date", range.end)
+      .order("receipt_date", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+  );
 
   // OUTWARD — diesel issued to machines. Join the machine for
   // name/plate/owner/fuel — a petrol-fueled machine's log never touched
@@ -111,22 +127,30 @@ export async function buildDieselRegister(
   // column isn't in the database yet.
   const logCols =
     "log_date, project_id, fuel_issued_liters, opening_reading, closing_reading, fuel_source, machines(name, registration_no, ownership, vendor_name, fuel_type)";
-  const withStock = await supabase
-    .from("daily_logs")
-    .select(`${logCols}, stock_project_id`)
-    .or(`project_id.eq.${projectId},stock_project_id.eq.${projectId}`)
-    .gt("fuel_issued_liters", 0)
-    .lte("log_date", range.end);
-  const logsRaw: unknown[] | null = withStock.error
-    ? (
-        await supabase
-          .from("daily_logs")
-          .select(logCols)
-          .eq("project_id", projectId)
-          .gt("fuel_issued_liters", 0)
-          .lte("log_date", range.end)
-      ).data
-    : withStock.data;
+  // Paged for the same reason as the receipts above — the busiest site is
+  // already about halfway to the cap.
+  const pagedLogs = (cols: string, scope: "stock" | "legacy") =>
+    fetchAllRows<unknown>((from, to) => {
+      const q = supabase.from("daily_logs").select(cols);
+      const scoped =
+        scope === "stock"
+          ? q.or(`project_id.eq.${projectId},stock_project_id.eq.${projectId}`)
+          : q.eq("project_id", projectId);
+      return scoped
+        .gt("fuel_issued_liters", 0)
+        .lte("log_date", range.end)
+        .order("log_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to);
+    });
+
+  let logsRaw: unknown[];
+  try {
+    logsRaw = await pagedLogs(`${logCols}, stock_project_id`, "stock");
+  } catch {
+    // Pre-0033 database: no stock_project_id column yet.
+    logsRaw = await pagedLogs(logCols, "legacy");
+  }
 
   type LogRow = {
     log_date: string;
