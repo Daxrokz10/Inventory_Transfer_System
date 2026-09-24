@@ -44,8 +44,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
+    // The theme script sets data-mode before React loads, so the server HTML
+    // and the browser's differ by design: React is told not to complain.
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${plexSans.variable} ${plexCondensed.variable} ${plexMono.variable} h-full antialiased`}
     >
       <head>

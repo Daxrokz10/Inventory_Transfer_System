@@ -44,14 +44,22 @@ export default async function CandidatePage({ params }: { params: Promise<{ id: 
   const isHr = access.hrStaff;
 
   // RLS: HR sees every candidate; interviewers only candidates assigned to them.
-  const { data: c } = await supabase
+  const { data: c, error: candidateError } = await supabase
     .from("hr_candidates")
     .select(
       "id, candidate_code, entry_date, created_at, name, designation, phone, current_salary, expected_salary, experience_years, industry_experience, hr_remarks, job_change_reason, status, resume_url, opening_code, opening_id, excel_row, offered_salary, date_of_joining, hr_comments",
     )
     .eq("id", id)
     .maybeSingle();
-  if (!c) notFound();
+  if (!c) {
+    // A 404 here is either a deleted candidate or one this user may not read.
+    // Say which in the server log, so it never has to be guessed at again.
+    console.warn(
+      `hr/candidates: nothing to show for ${id} — user ${user.id} (hrStaff=${isHr}, interviewer=${access.interviewer})` +
+        (candidateError ? ` — ${candidateError.message}` : " — no row returned (deleted, or not assigned to this user)"),
+    );
+    notFound();
+  }
 
   const [{ data: ivs }, { data: history }, people, stages, openings] = await Promise.all([
     supabase

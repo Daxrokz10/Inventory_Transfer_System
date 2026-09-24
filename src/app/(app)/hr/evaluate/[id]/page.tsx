@@ -8,6 +8,7 @@ import { parseScores } from "@/lib/hr/evaluation";
 import { fmtDateTime } from "@/lib/hr/format";
 import { listPeople } from "@/lib/hr/people";
 import { ResumeFrame, ResumeSkeleton } from "../../ResumePanel";
+import { AssignPanelForm } from "../../HrForms";
 import { EvaluationForm } from "./EvaluationForm";
 
 /* The interview room: the evaluation form on the left, the candidate's resume
@@ -25,7 +26,23 @@ export default async function EvaluatePage({ params }: { params: Promise<{ id: s
   if (!iv) notFound();
 
   const mine = iv.interviewer_id === user.id;
-  if (!mine && !access.hrStaff) notFound();
+  // Anyone interviewing this candidate may read the other evaluations for them
+  // — the earlier round, and the rest of their own panel. Only the interviewer
+  // whose form it is can fill it in.
+  const onThisCandidate = mine
+    ? true
+    : Boolean(
+        (
+          await supabase
+            .from("hr_interviews")
+            .select("id")
+            .eq("candidate_id", iv.candidate_id)
+            .eq("interviewer_id", user.id)
+            .neq("state", "cancelled")
+            .limit(1)
+        ).data?.length,
+      );
+  if (!mine && !access.hrStaff && !onThisCandidate) notFound();
 
   const [{ data: c }, people] = await Promise.all([
     supabase
@@ -38,6 +55,16 @@ export default async function EvaluatePage({ params }: { params: Promise<{ id: s
   if (!c) notFound();
   const interviewer = people.find((p) => p.id === iv.interviewer_id)?.name ?? "Unknown";
   const readOnly = !mine || iv.state === "completed" || iv.state === "cancelled";
+
+  // Once this evaluation is in, the interviewer can hand the candidate to
+  // whoever should take the next round, without going via HR.
+  const { data: allRounds } = await supabase
+    .from("hr_interviews")
+    .select("round, state")
+    .eq("candidate_id", iv.candidate_id);
+  const nextRound = Math.max(0, ...(allRounds ?? []).filter((r) => r.state !== "cancelled").map((r) => r.round)) + 1;
+  const canPassOn = mine && iv.state === "completed";
+  const interviewers = people.filter((p) => p.canInterview).map(({ id, label }) => ({ id, label }));
 
   const facts: [string, string | null][] = [
     ["Designation", c.designation],
@@ -52,7 +79,7 @@ export default async function EvaluatePage({ params }: { params: Promise<{ id: s
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link href={mine ? "/hr/my-interviews" : `/hr/candidates/${c.id}`} className="text-sm text-ink-2 hover:underline">
+          <Link href={mine ? "/hr/my-interviews" : `/hr/candidates/${iv.candidate_id}`} className="text-sm text-ink-2 hover:underline">
             ← {mine ? "My interviews" : "Candidate"}
           </Link>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-ink">
@@ -68,7 +95,7 @@ export default async function EvaluatePage({ params }: { params: Promise<{ id: s
         <div className="flex items-center gap-2">
           {iv.state === "completed" && <Badge tone="good">Submitted {fmtDateTime(iv.completed_at)}</Badge>}
           {iv.state === "cancelled" && <Badge tone="danger">Cancelled</Badge>}
-          {!mine && <Badge>Filled by {interviewer}</Badge>}
+          {!mine && <Badge>{iv.state === "completed" ? "Filled by" : "Assigned to"} {interviewer}</Badge>}
         </div>
       </div>
 
@@ -115,11 +142,31 @@ export default async function EvaluatePage({ params }: { params: Promise<{ id: s
               initialRecommendation={iv.recommendation}
               readOnly={readOnly}
             />
-            {readOnly && !mine && <p className="mt-3 text-xs text-ink-3">Read-only: this is another interviewer&apos;s form.</p>}
+            {readOnly && !mine && (
+              <p className="mt-3 text-xs text-ink-3">
+                Read-only: {interviewer}&apos;s form for this candidate
+                {iv.state === "completed" ? "." : " — not submitted yet."}
+              </p>
+            )}
             {readOnly && mine && iv.state === "completed" && (
               <p className="mt-3 text-xs text-ink-3">Submitted. Ask HR if something needs changing.</p>
             )}
           </Card>
+
+          {canPassOn && (
+            <Card className="space-y-3">
+              <CardLabel>Send to round {nextRound}</CardLabel>
+              <p className="text-sm text-ink-2">
+                Taking {c.name} forward? Choose who should interview them next. HR is told, and can change it.
+                {iv.recommendation === "reject" && " You recommended rejecting — leave this alone if that stands."}
+              </p>
+              {interviewers.length === 0 ? (
+                <p className="text-sm text-ink-2">Nobody else has Interviewer access yet.</p>
+              ) : (
+                <AssignPanelForm candidateId={iv.candidate_id} nextRound={nextRound} existingRounds={[]} people={interviewers} />
+              )}
+            </Card>
+          )}
         </div>
 
         <Card className="space-y-2 xl:sticky xl:top-4 xl:h-[calc(100vh-2rem)]">
