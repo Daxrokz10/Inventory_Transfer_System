@@ -47,7 +47,9 @@ export default async function DieselReportsPage({
 
   let receiptsQuery = supabase
     .from("fuel_receipts")
-    .select("project_id, liters, total_cost")
+    // "*" rather than a column list, so billed_liters is picked up once
+    // migration 0045 runs without breaking this query before it does.
+    .select("*")
     .eq("fuel_type", fuel)
     .gte("receipt_date", start)
     .lte("receipt_date", end);
@@ -72,7 +74,20 @@ export default async function DieselReportsPage({
   );
   const receivedByLabel = new Map<string, number>();
   let grandReceivedFuel = 0;
-  for (const r of (receiptsRaw ?? []) as { project_id: string; liters: number }[]) {
+  // Paid for but never reached the barrel — the deliverer's deduction.
+  let grandShortLiters = 0;
+  let grandShortAmount = 0;
+  for (const r of (receiptsRaw ?? []) as {
+    project_id: string;
+    liters: number;
+    billed_liters?: number | null;
+    rate_per_liter: number | null;
+  }[]) {
+    if (r.billed_liters != null && Number(r.billed_liters) > Number(r.liters)) {
+      const short = Number(r.billed_liters) - Number(r.liters);
+      grandShortLiters += short;
+      grandShortAmount += short * Number(r.rate_per_liter ?? 0);
+    }
     const label = projectLabel.get(r.project_id) ?? "—";
     receivedByLabel.set(label, (receivedByLabel.get(label) ?? 0) + Number(r.liters));
     grandReceivedFuel += Number(r.liters);
@@ -138,6 +153,12 @@ export default async function DieselReportsPage({
             <p className="mt-1 text-xs text-ink-3">
               {grandReceivedFuel.toLocaleString("en-IN", { maximumFractionDigits: 0 })} L{" "}
               {fuelLabel.toLowerCase()} received
+            </p>
+          )}
+          {grandShortLiters > 0 && (
+            <p className="mt-1 text-xs font-medium text-warn">
+              + {grandShortLiters.toLocaleString("en-IN", { maximumFractionDigits: 1 })} L paid for, never
+              received ({inr(grandShortAmount)})
             </p>
           )}
         </Card>

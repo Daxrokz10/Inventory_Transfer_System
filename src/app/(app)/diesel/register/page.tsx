@@ -143,7 +143,12 @@ export default async function DieselRegisterPage({
         <Card>
           <CardLabel>Inward · {month}</CardLabel>
           <p className="mt-2 font-mono text-xl font-semibold tabular-nums text-good">+{L(register.inwardLiters)}</p>
-          {register.inwardAmount > 0 && <p className="mt-1 text-xs text-ink-3">{inr(register.inwardAmount)}</p>}
+          {register.inwardAmount > 0 && <p className="mt-1 text-xs text-ink-3">{inr(register.inwardAmount)} paid</p>}
+          {register.shortReceivedLiters > 0 && (
+            <p className="mt-1 text-xs font-medium text-warn">
+              {L(register.shortReceivedLiters)} paid for, never received ({inr(register.shortReceivedAmount)})
+            </p>
+          )}
         </Card>
         <Card>
           <CardLabel>Outward · {month}</CardLabel>
@@ -230,6 +235,11 @@ export default async function DieselRegisterPage({
                   </TD>
                   <TD className="text-right font-mono tabular-nums text-good">
                     {r.type === "INWARD" ? r.liters.toFixed(1) : ""}
+                    {r.type === "INWARD" && r.billedLiters != null && (
+                      <span className="block font-sans text-[10px] text-warn">
+                        billed {r.billedLiters.toFixed(1)} · {(r.billedLiters - r.liters).toFixed(1)} short
+                      </span>
+                    )}
                   </TD>
                   <TD className="text-right font-mono tabular-nums text-danger">
                     {r.type === "OUTWARD" ? r.liters.toFixed(1) : ""}

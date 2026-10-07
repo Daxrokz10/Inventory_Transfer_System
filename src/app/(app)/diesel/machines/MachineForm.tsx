@@ -232,17 +232,12 @@ export function NewMachineButton({
           <Field label="Tank capacity (L)" hint="Optional — enables over-fill checks">
             <Input name="tank_capacity_liters" type="number" step="0.01" min="0" />
           </Field>
+          {/* No rent field: hire rates are a standard rate per machine type,
+              set centrally (machine_type_rates), not typed per machine. */}
           {ownership === "external" && (
-            <>
-              <Field label="Vendor name">
-                <Input name="vendor_name" required placeholder="Hiring vendor" />
-              </Field>
-              {isAdmin && (
-                <Field label="Monthly rent (₹)" hint="Optional — feeds the Own vs Rent panel">
-                  <Input name="monthly_rent" type="number" step="1" min="0" />
-                </Field>
-              )}
-            </>
+            <Field label="Vendor name">
+              <Input name="vendor_name" required placeholder="Hiring vendor" />
+            </Field>
           )}
         </div>
 

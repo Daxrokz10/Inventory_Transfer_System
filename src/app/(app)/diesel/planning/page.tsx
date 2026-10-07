@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { selectAll } from "@/lib/supabase/selectAll";
+import { selectAll, fetchAllRows } from "@/lib/supabase/selectAll";
 import { Card } from "@/components/ui/Card";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Badge } from "@/components/ui/Badge";
@@ -14,6 +14,8 @@ import {
   type OwnVsRentRow,
   type RelocationTier,
 } from "@/lib/diesel/planning";
+import { analyzeFleet, type UtilLog } from "@/lib/diesel/utilization";
+import { FleetUtilizationSection } from "./FleetUtilization";
 import { RequirementForm } from "./RequirementForm";
 import { RequirementResolveControls } from "./RequirementResolveControls";
 import { getAuthUser, getProfile, canViewAll, canWriteAll } from "@/lib/auth";
@@ -32,7 +34,12 @@ const fmtDate = (d: string) =>
     year: "numeric",
   });
 
-export default async function PlanningPage() {
+export default async function PlanningPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ verdict?: string; ownership?: string; type?: string; site?: string; q?: string }>;
+}) {
+  const sp = await searchParams;
   const supabase = await createClient();
   const user = await getAuthUser();
   if (!user) redirect("/login");
@@ -42,33 +49,70 @@ export default async function PlanningPage() {
   const canWrite = canWriteAll(profile?.role);
   if (!isAdmin) redirect("/diesel");
 
-  const [{ data: reqRaw }, machinesRaw, { data: sites }] = await Promise.all([
+  const [{ data: reqRaw }, machinesRaw, { data: sites }, logs, ratesRes] = await Promise.all([
     supabase
       .from("site_requirements")
       .select("*")
       .order("needed_from", { ascending: true }),
     selectAll<Machine>(() => supabase.from("machines").select("*").order("id")),
-    supabase
-      .from("projects")
-      .select("id, name, code, state, city")
-      .eq("is_active", true)
-      .order("name"),
+    // All sites, inactive included — a removed site's machines still need
+    // a label in the utilization table.
+    supabase.from("projects").select("id, name, code, state, city, is_active").order("name"),
+    // Every fuel entry — the utilization analysis needs each machine's full
+    // reading history. Paged: this is several thousand rows and growing.
+    fetchAllRows<UtilLog>((from, to) =>
+      supabase
+        .from("daily_logs")
+        .select("machine_id, project_id, log_date, opening_reading, closing_reading, fuel_issued_liters, total_cost")
+        .order("log_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    ),
+    // Standard hire rate per type (migration 0044). Absent before that
+    // migration runs — the analysis then prices only machines with their
+    // own rent entered.
+    supabase.from("machine_type_rates").select("machine_type, monthly_rent"),
   ]);
 
   const requirements = (reqRaw ?? []) as SiteRequirement[];
   const machines = (machinesRaw ?? []) as Machine[];
-  const siteList = (sites ?? []) as {
+  const allSites = (sites ?? []) as {
     id: string;
     name: string;
     code: string | null;
     state: string | null;
     city: string | null;
+    is_active: boolean;
   }[];
-  const siteName = new Map(siteList.map((s) => [s.id, s.name]));
-  const siteCode = new Map(siteList.map((s) => [s.id, s.code]));
+  // Requirements can only be raised for a live site.
+  const siteList = allSites.filter((s) => s.is_active);
+  const siteName = new Map(allSites.map((s) => [s.id, s.name]));
+  const siteCode = new Map(allSites.map((s) => [s.id, s.code]));
   const siteMeta = new Map<string, SiteMeta>(
-    siteList.map((s) => [s.id, { state: s.state, city: s.city }]),
+    allSites.map((s) => [s.id, { state: s.state, city: s.city }]),
   );
+
+  const typeRates = new Map(
+    ((ratesRes.error ? [] : ratesRes.data) ?? []).map((r) => [
+      r.machine_type as string,
+      Number(r.monthly_rent),
+    ]),
+  );
+  const today = new Date().toISOString().slice(0, 10);
+  const utilization = analyzeFleet(machines, logs, {
+    today,
+    typeRates,
+    siteState: new Map(allSites.map((s) => [s.id, s.state])),
+  });
+  // Hired types where some active unit has neither its own rent nor a
+  // type rate — the page warns that their savings can't be sized yet.
+  const unpricedTypes = [
+    ...new Set(
+      utilization.machines
+        .filter((r) => r.machine.is_active && r.machine.ownership === "external" && r.monthlyRent == null)
+        .map((r) => r.machine.machine_type),
+    ),
+  ].sort();
 
   const open = requirements.filter((r) => r.status === "open");
   const resolved = requirements.filter((r) => r.status !== "open");
@@ -80,8 +124,26 @@ export default async function PlanningPage() {
     <div className="space-y-6">
       <PageHeader
         title="Planning"
-        subtitle="Upcoming machine requirements, matched against the fleet's SO end dates and the rent-vs-buy cost table"
+        subtitle="Which machines are earning their keep, what to release or move, and upcoming requirements matched against the fleet"
       />
+
+      <FleetUtilizationSection
+        data={utilization}
+        siteCode={siteCode}
+        siteName={siteName}
+        unpricedTypes={unpricedTypes}
+        filters={{
+          verdict: sp.verdict ?? "",
+          ownership: sp.ownership ?? "",
+          type: sp.type ?? "",
+          site: sp.site ?? "",
+          q: sp.q ?? "",
+        }}
+      />
+
+      <h2 className="pt-4 font-display text-sm font-semibold uppercase tracking-[0.1em] text-ink-3">
+        Requirements &amp; own vs rent
+      </h2>
 
       {canWrite && <RequirementForm sites={siteList} />}
 
@@ -231,8 +293,8 @@ function FleetOwnVsRentPanel({ rows }: { rows: OwnVsRentRow[] }) {
       <p className="border-t border-line px-5 py-2 font-mono text-[11px] text-ink-3">
         Live count of active external (hired) machines and their entered monthly rent, from the
         machines register. Payback = buy price ÷ average rent we actually pay outside vendors for
-        this type — Shraddha (SGC's sister company) is excluded from the rent figures and the
-        call, since paying them isn't real market dependency, detected by vendor name containing
+        this type — Shraddha (SGC&apos;s sister company) is excluded from the rent figures and the
+        call, since paying them isn&apos;t real market dependency, detected by vendor name containing
         &quot;Shraddha&quot;. Types with no buy price show the rent as an unpriced opportunity;
         ⚠ marks types with hired units that have no rent entered yet, so the total understates them.
       </p>

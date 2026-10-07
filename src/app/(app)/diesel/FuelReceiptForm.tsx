@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Field";
 
 // Record a barrel / fuel delivery (diesel or petrol) arriving at this site.
-// Liters is the only required field; the rate defaults to the day's market
-// price for whichever fuel is picked, unless a "rate paid" is entered. Kept
-// collapsed until opened so it doesn't crowd the daily sheet.
+// Two litre figures: what the invoice BILLS (cost) and what actually went
+// into the barrel (stock) — deliverers often keep a few litres as their own
+// payment, so the two differ. Billed is optional and defaults to received.
+// The rate defaults to the day's market price unless a "rate paid" is
+// entered. Kept collapsed until opened so it doesn't crowd the daily sheet.
 export function FuelReceiptForm({
   projectId,
   today,
@@ -17,10 +19,16 @@ export function FuelReceiptForm({
   today: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [received, setReceived] = useState("");
+  const [billed, setBilled] = useState("");
   const [error, formAction, pending] = useActionState(
     async (prev: string | null, fd: FormData) => {
       const result = await addFuelReceipt(prev, fd);
-      if (!result) setOpen(false);
+      if (!result) {
+        setOpen(false);
+        setReceived("");
+        setBilled("");
+      }
       return result;
     },
     null,
@@ -33,6 +41,11 @@ export function FuelReceiptForm({
       </Button>
     );
   }
+
+  const r = Number(received);
+  const b = Number(billed);
+  const short = billed.trim() !== "" && received.trim() !== "" && b > r ? b - r : 0;
+  const billedBelow = billed.trim() !== "" && received.trim() !== "" && b < r;
 
   return (
     <form action={formAction} className="space-y-3 rounded-lg border border-line bg-surface-2 p-4">
@@ -58,8 +71,28 @@ export function FuelReceiptForm({
         <Field label="Date">
           <Input type="date" name="receipt_date" defaultValue={today} max={today} required />
         </Field>
-        <Field label="Liters received">
-          <Input type="number" name="liters" step="0.01" min="0" required placeholder="e.g. 200" />
+        <Field label="Liters billed" hint="As on the invoice — leave blank if same as received">
+          <Input
+            type="number"
+            name="billed_liters"
+            step="0.01"
+            min="0"
+            placeholder="e.g. 102"
+            value={billed}
+            onChange={(e) => setBilled(e.target.value)}
+          />
+        </Field>
+        <Field label="Liters received in barrel" hint="What actually went into the barrel">
+          <Input
+            type="number"
+            name="liters"
+            step="0.01"
+            min="0"
+            required
+            placeholder="e.g. 100"
+            value={received}
+            onChange={(e) => setReceived(e.target.value)}
+          />
         </Field>
         <Field label="Barrels" hint="Optional — number of drums">
           <Input type="number" name="barrels" step="1" min="0" placeholder="e.g. 1" />
@@ -75,9 +108,18 @@ export function FuelReceiptForm({
         </Field>
       </div>
 
+      {short > 0 && (
+        <p className="text-sm text-warn">
+          {short.toFixed(2).replace(/\.00$/, "")} L paid for but not received — cost is charged on{" "}
+          {b} L, stock goes up by {r} L.
+        </p>
+      )}
+      {billedBelow && (
+        <p className="text-sm text-danger">Billed can&apos;t be less than what was received.</p>
+      )}
       {error && <p className="text-sm text-danger">{error}</p>}
 
-      <Button type="submit" size="sm" disabled={pending}>
+      <Button type="submit" size="sm" disabled={pending || billedBelow}>
         {pending ? "Saving…" : "Save receipt"}
       </Button>
     </form>

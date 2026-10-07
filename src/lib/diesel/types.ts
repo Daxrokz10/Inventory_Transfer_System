@@ -40,6 +40,9 @@ export interface Machine {
       just a way to mark a machine for closer scrutiny. Never shown to
       non-admins. */
   flagged_suspicious: boolean;
+  /** When the row was registered — the fallback deployment date for a
+      machine registered without one. */
+  created_at: string;
 }
 
 export type SoStatus =
@@ -144,6 +147,10 @@ export interface FuelReceipt {
   created_by: string | null;
   created_at: string;
   fuel_type: "diesel" | "petrol";
+  /** What the invoice charged for, when more than what reached the barrel
+      (the deliverer keeps a few litres as payment). Null = same as
+      `liters`. Cost follows this; stock follows `liters`. */
+  billed_liters?: number | null;
 }
 
 export interface AnomalyFlag {

@@ -43,6 +43,10 @@ export interface RegisterRow {
   /** Outward only, group sites. A sister site filed it, but the fuel came
       from THIS site's barrels — debited here. */
   suppliedTo: string | null;
+  /** Inward only. Litres the invoice charged for, when more than `liters`
+      reached the barrel (deliverer kept the difference as payment). Null =
+      billed what was received. `liters` is what moves the balance. */
+  billedLiters: number | null;
   runningBalance: number;
   note: string | null;
 }
@@ -61,6 +65,10 @@ export interface RegisterResult {
   /** Outward liters filled at Shraddha's pump or offsite — never touched
       this site's stock, shown for context but excluded from the balance. */
   outwardNotFromStockLiters: number;
+  /** Paid for but never reached the barrel, within the shown range — the
+      deliverer's deduction. Litres and their cost at each delivery's rate. */
+  shortReceivedLiters: number;
+  shortReceivedAmount: number;
   closingBalance: number;
 }
 
@@ -100,24 +108,35 @@ export async function buildDieselRegister(
   // Paged: this is a site's entire delivery history, which grows without
   // bound — past 1000 rows an unpaged query silently drops the rest and
   // the opening balance starts from an incomplete history.
-  const receiptsRaw = await fetchAllRows<{
+  type ReceiptRow = {
     receipt_date: string;
     liters: number;
+    billed_liters?: number | null;
     rate_per_liter: number | null;
     total_cost: number | null;
     vendor: string | null;
     note: string | null;
-  }>((from, to) =>
-    supabase
-      .from("fuel_receipts")
-      .select("receipt_date, liters, rate_per_liter, total_cost, vendor, note")
-      .eq("project_id", projectId)
-      .eq("fuel_type", fuel)
-      .lte("receipt_date", range.end)
-      .order("receipt_date", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, to),
-  );
+  };
+  const receiptCols = "receipt_date, liters, rate_per_liter, total_cost, vendor, note";
+  const pagedReceipts = (cols: string) =>
+    fetchAllRows<ReceiptRow>((from, to) =>
+      supabase
+        .from("fuel_receipts")
+        .select(cols)
+        .eq("project_id", projectId)
+        .eq("fuel_type", fuel)
+        .lte("receipt_date", range.end)
+        .order("receipt_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+  let receiptsRaw: ReceiptRow[];
+  try {
+    receiptsRaw = await pagedReceipts(`${receiptCols}, billed_liters`);
+  } catch {
+    // Pre-0045 database: no billed_liters column yet — billed = received.
+    receiptsRaw = await pagedReceipts(receiptCols);
+  }
 
   // OUTWARD — diesel issued to machines. Join the machine for
   // name/plate/owner/fuel — a petrol-fueled machine's log never touched
@@ -169,14 +188,7 @@ export async function buildDieselRegister(
     } | null;
   };
 
-  const inward: RegisterRow[] = ((receiptsRaw ?? []) as {
-    receipt_date: string;
-    liters: number;
-    rate_per_liter: number | null;
-    total_cost: number | null;
-    vendor: string | null;
-    note: string | null;
-  }[]).map((r) => ({
+  const inward: RegisterRow[] = receiptsRaw.map((r) => ({
     date: r.receipt_date,
     type: "INWARD" as const,
     subGroup: "EXTERNAL" as const,
@@ -193,6 +205,10 @@ export async function buildDieselRegister(
     fromStock: false,
     drawnFrom: null,
     suppliedTo: null,
+    billedLiters:
+      r.billed_liters != null && Number(r.billed_liters) > Number(r.liters)
+        ? Number(r.billed_liters)
+        : null,
     runningBalance: 0,
     note: r.note,
   }));
@@ -250,6 +266,7 @@ export async function buildDieselRegister(
             ? (siteCode.get(stockSite) ?? "another site")
             : null,
         suppliedTo: !filedHere ? (siteCode.get(l.project_id) ?? "another site") : null,
+        billedLiters: null,
         runningBalance: 0,
         note: null,
       };
@@ -269,14 +286,22 @@ export async function buildDieselRegister(
   let inwardAmount = 0;
   let outwardLiters = 0;
   let outwardNotFromStockLiters = 0;
+  let shortReceivedLiters = 0;
+  let shortReceivedAmount = 0;
   const rows: RegisterRow[] = [];
   for (const row of all) {
     const shown = row.date >= range.start;
     if (row.type === "INWARD") {
+      // Stock rises by what reached the barrel, never by what was billed.
       balance += row.liters;
       if (shown) {
         inwardLiters += row.liters;
         inwardAmount += row.amount ?? 0;
+        if (row.billedLiters != null) {
+          const short = row.billedLiters - row.liters;
+          shortReceivedLiters += short;
+          shortReceivedAmount += short * (row.rate ?? 0);
+        }
       }
     } else {
       // Only a fill drawn from this site's own barrels moves the balance —
@@ -306,6 +331,8 @@ export async function buildDieselRegister(
     inwardAmount,
     outwardLiters,
     outwardNotFromStockLiters,
+    shortReceivedLiters: Number(shortReceivedLiters.toFixed(2)),
+    shortReceivedAmount: Number(shortReceivedAmount.toFixed(2)),
     closingBalance: Number(balance.toFixed(2)),
   };
 }
@@ -332,6 +359,11 @@ export function registerToCsv(result: RegisterResult): string {
     "END READING",
     "RUNNING BALANCE (L)",
     "REMARKS",
+    // Appended, not inserted, so the DIESEL_REG column order above is kept.
+    // QTY (L) on an inward row is what reached the barrel; these two show
+    // what the invoice charged for and the deliverer's deduction.
+    "BILLED QTY (L)",
+    "PAID NOT RECEIVED (L)",
   ];
   const lines = [header.join(",")];
   for (const r of result.rows) {
@@ -363,6 +395,8 @@ export function registerToCsv(result: RegisterResult): string {
         r.meterBroken ? "Reading stop" : r.endReading ?? "",
         r.runningBalance.toFixed(2),
         csvEscape(r.note ?? ""),
+        r.type === "INWARD" ? (r.billedLiters ?? r.liters).toFixed(2) : "",
+        r.type === "INWARD" && r.billedLiters != null ? (r.billedLiters - r.liters).toFixed(2) : "",
       ].join(","),
     );
   }

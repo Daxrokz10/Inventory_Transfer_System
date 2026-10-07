@@ -30,7 +30,6 @@ export async function addMachine(
   const vendor_name = get("vendor_name");
   const registration_no = get("registration_no");
   const capacityRaw = get("tank_capacity_liters");
-  const monthlyRentRaw = get("monthly_rent");
   const readingRaw = get("current_reading");
   const meter_broken = formData.get("meter_broken") === "true";
   const track_fuel = formData.get("track_fuel") != null;
@@ -79,7 +78,6 @@ export async function addMachine(
     fuel_type,
     ownership,
     vendor_name: ownership === "external" ? vendor_name : null,
-    monthly_rent: ownership === "external" && monthlyRentRaw != null ? Number(monthlyRentRaw) : null,
     tank_capacity_liters: capacityRaw == null ? null : Number(capacityRaw),
     track_fuel,
     track_meter,

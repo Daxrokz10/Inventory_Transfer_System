@@ -271,6 +271,10 @@ export async function addFuelReceipt(
   const project_id = String(formData.get("project_id") ?? "").trim();
   const receipt_date = String(formData.get("receipt_date") ?? "").trim();
   const liters = Number(formData.get("liters"));
+  // What the invoice charges for — can exceed what reached the barrel when
+  // the deliverer keeps a few litres as payment. Blank = same as received.
+  const billedRaw = String(formData.get("billed_liters") ?? "").trim();
+  const billedLiters = billedRaw !== "" ? Number(billedRaw) : null;
   const barrelsRaw = String(formData.get("barrels") ?? "").trim();
   const rateRaw = String(formData.get("rate_per_liter") ?? "").trim();
   const vendor = String(formData.get("vendor") ?? "").trim() || null;
@@ -290,6 +294,9 @@ export async function addFuelReceipt(
     return "The receipt date cannot be in the future.";
   }
   if (!(liters > 0)) return "Enter how many liters were received.";
+  if (billedLiters != null && !(billedLiters >= liters)) {
+    return "Liters billed can't be less than liters received.";
+  }
   if (fuel_type !== "diesel" && fuel_type !== "petrol") {
     return "Choose the fuel received (diesel or petrol).";
   }
@@ -307,7 +314,9 @@ export async function addFuelReceipt(
     const prices = await getPricesForCity(cityForState(project?.state ?? null), receipt_date);
     rate = fuel_type === "petrol" ? prices.petrol : prices.diesel;
   }
-  const total_cost = rate != null ? Number((rate * liters).toFixed(2)) : null;
+  // Cost is what we're charged for (billed); stock is what we received.
+  const paidLiters = billedLiters ?? liters;
+  const total_cost = rate != null ? Number((rate * paidLiters).toFixed(2)) : null;
 
   const { error } = await supabase.from("fuel_receipts").insert({
     project_id,
@@ -317,6 +326,9 @@ export async function addFuelReceipt(
     barrels: barrelsRaw !== "" ? Number(barrelsRaw) : null,
     rate_per_liter: rate,
     total_cost,
+    // Only sent when it differs — keeps this insert working on a database
+    // that hasn't had migration 0045 yet, for the ordinary no-deduction case.
+    ...(billedLiters != null && billedLiters > liters ? { billed_liters: billedLiters } : {}),
     vendor,
     note,
     created_by: user.id,

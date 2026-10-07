@@ -537,6 +537,12 @@ export default async function DieselPage({
                       {r.fuel_type}
                     </Badge>
                     <span className="font-mono tabular-nums text-ink">{Number(r.liters).toFixed(0)} L</span>
+                    {r.billed_liters != null && Number(r.billed_liters) > Number(r.liters) && (
+                      <span className="text-warn">
+                        {" "}
+                        (billed {Number(r.billed_liters).toFixed(0)} L)
+                      </span>
+                    )}
                     {r.barrels ? ` · ${r.barrels} barrel${r.barrels === 1 ? "" : "s"}` : ""} ·{" "}
                     {r.receipt_date}
                     {r.total_cost != null ? ` · ${inr(Number(r.total_cost))}` : ""}
