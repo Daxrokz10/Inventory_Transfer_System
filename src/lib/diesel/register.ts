@@ -17,12 +17,16 @@ import { fetchAllRows } from "@/lib/supabase/selectAll";
 
 export interface RegisterRow {
   date: string;
-  type: "INWARD" | "OUTWARD";
+  /** ADJUSTMENT = a correction to the balance that is neither a delivery
+      nor a fill (fuel_stock_adjustments) — signed litres, a reason, no cost. */
+  type: "INWARD" | "OUTWARD" | "ADJUSTMENT";
   /** INTERNAL / EXTERNAL for outward; vendor's diesel is EXTERNAL for inward. */
   subGroup: "INTERNAL" | "EXTERNAL" | "";
   party: string; // inward: fuel vendor · outward: machine owner (SGC / vendor)
   machine: string; // outward only
   assetCode: string; // outward only (numberplate / code)
+  /** Always positive for INWARD/OUTWARD. Signed for ADJUSTMENT (negative =
+      stock taken off). */
   liters: number;
   rate: number | null; // inward only
   amount: number | null; // inward only
@@ -69,6 +73,8 @@ export interface RegisterResult {
       deliverer's deduction. Litres and their cost at each delivery's rate. */
   shortReceivedLiters: number;
   shortReceivedAmount: number;
+  /** Net of stock adjustments within the shown range (signed). */
+  adjustmentLiters: number;
   closingBalance: number;
 }
 
@@ -169,6 +175,26 @@ export async function buildDieselRegister(
   } catch {
     // Pre-0033 database: no stock_project_id column yet.
     logsRaw = await pagedLogs(logCols, "legacy");
+  }
+
+  // ADJUSTMENTS — balance corrections (migration 0046). A database without
+  // the table yet simply has none.
+  type AdjRow = { adj_date: string; liters: number; reason: string };
+  let adjustmentsRaw: AdjRow[] = [];
+  try {
+    adjustmentsRaw = await fetchAllRows<AdjRow>((from, to) =>
+      supabase
+        .from("fuel_stock_adjustments")
+        .select("adj_date, liters, reason")
+        .eq("project_id", projectId)
+        .eq("fuel_type", fuel)
+        .lte("adj_date", range.end)
+        .order("adj_date", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+    );
+  } catch {
+    adjustmentsRaw = [];
   }
 
   type LogRow = {
@@ -274,10 +300,34 @@ export async function buildDieselRegister(
 
   // Merge chronologically; inward before outward on the same date (barrels
   // land, then get issued). Then thread the running balance from opening.
-  const all = [...inward, ...outward].sort((a, b) => {
+  const adjustments: RegisterRow[] = adjustmentsRaw.map((a) => ({
+    date: a.adj_date,
+    type: "ADJUSTMENT" as const,
+    subGroup: "" as const,
+    party: "Stock adjustment",
+    machine: "",
+    assetCode: "",
+    liters: Number(a.liters),
+    rate: null,
+    amount: null,
+    startReading: null,
+    endReading: null,
+    meterBroken: false,
+    fuelSource: null,
+    fromStock: false,
+    drawnFrom: null,
+    suppliedTo: null,
+    billedLiters: null,
+    runningBalance: 0,
+    note: a.reason,
+  }));
+
+  // Same day: deliveries land first, then fills, then any correction —
+  // an adjustment reconciles the day's position, so it goes last.
+  const typeOrder = { INWARD: 0, OUTWARD: 1, ADJUSTMENT: 2 } as const;
+  const all = [...inward, ...outward, ...adjustments].sort((a, b) => {
     if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-    if (a.type !== b.type) return a.type === "INWARD" ? -1 : 1;
-    return 0;
+    return typeOrder[a.type] - typeOrder[b.type];
   });
 
   let balance = openingStock;
@@ -288,6 +338,7 @@ export async function buildDieselRegister(
   let outwardNotFromStockLiters = 0;
   let shortReceivedLiters = 0;
   let shortReceivedAmount = 0;
+  let adjustmentLiters = 0;
   const rows: RegisterRow[] = [];
   for (const row of all) {
     const shown = row.date >= range.start;
@@ -303,6 +354,10 @@ export async function buildDieselRegister(
           shortReceivedAmount += short * (row.rate ?? 0);
         }
       }
+    } else if (row.type === "ADJUSTMENT") {
+      // Signed: a negative adjustment takes stock off.
+      balance += row.liters;
+      if (shown) adjustmentLiters += row.liters;
     } else {
       // Only a fill drawn from this site's own barrels moves the balance —
       // a Shraddha-pump, offsite, or sister-site-stock fill never touched
@@ -333,6 +388,7 @@ export async function buildDieselRegister(
     outwardNotFromStockLiters,
     shortReceivedLiters: Number(shortReceivedLiters.toFixed(2)),
     shortReceivedAmount: Number(shortReceivedAmount.toFixed(2)),
+    adjustmentLiters: Number(adjustmentLiters.toFixed(2)),
     closingBalance: Number(balance.toFixed(2)),
   };
 }
@@ -368,7 +424,9 @@ export function registerToCsv(result: RegisterResult): string {
   const lines = [header.join(",")];
   for (const r of result.rows) {
     const source =
-      r.type === "OUTWARD"
+      r.type === "ADJUSTMENT"
+        ? "Stock adjustment"
+        : r.type === "OUTWARD"
         ? r.fuelSource === "shraddha"
           ? "Shraddha pump"
           : r.fuelSource === "outside"

@@ -162,6 +162,12 @@ export default async function DieselRegisterPage({
         <Card>
           <CardLabel>Closing balance</CardLabel>
           <p className="mt-2 font-mono text-xl font-semibold tabular-nums">{L(register.closingBalance)}</p>
+          {register.adjustmentLiters !== 0 && (
+            <p className="mt-1 text-xs text-warn">
+              incl. {register.adjustmentLiters > 0 ? "+" : "−"}
+              {L(Math.abs(register.adjustmentLiters))} stock adjustment
+            </p>
+          )}
         </Card>
         <Card>
           <CardLabel>Opening anchor</CardLabel>
@@ -206,11 +212,18 @@ export default async function DieselRegisterPage({
               </tr>
             ) : (
               register.rows.map((r, i) => (
-                <TRow key={i} className={r.type === "INWARD" ? "bg-good-soft/30" : undefined}>
+                <TRow
+                  key={i}
+                  className={
+                    r.type === "INWARD" ? "bg-good-soft/30" : r.type === "ADJUSTMENT" ? "bg-warn-soft/40" : undefined
+                  }
+                >
                   <TD className="whitespace-nowrap">{r.date}</TD>
                   <TD>
                     {r.type === "INWARD" ? (
                       <Badge tone="good">Inward</Badge>
+                    ) : r.type === "ADJUSTMENT" ? (
+                      <Badge tone="warn">Adjustment</Badge>
                     ) : (
                       <div className="flex flex-wrap items-center gap-1">
                         <Badge tone={r.subGroup === "EXTERNAL" ? "warn" : "neutral"}>
@@ -224,7 +237,9 @@ export default async function DieselRegisterPage({
                     )}
                   </TD>
                   <TD>
-                    {r.type === "INWARD" ? (
+                    {r.type === "ADJUSTMENT" ? (
+                      <span className="text-ink-2">{r.note ?? "Stock adjustment"}</span>
+                    ) : r.type === "INWARD" ? (
                       <span className="text-ink-2">{r.party}</span>
                     ) : (
                       <>
@@ -235,6 +250,7 @@ export default async function DieselRegisterPage({
                   </TD>
                   <TD className="text-right font-mono tabular-nums text-good">
                     {r.type === "INWARD" ? r.liters.toFixed(1) : ""}
+                    {r.type === "ADJUSTMENT" && r.liters > 0 ? `+${r.liters.toFixed(1)}` : ""}
                     {r.type === "INWARD" && r.billedLiters != null && (
                       <span className="block font-sans text-[10px] text-warn">
                         billed {r.billedLiters.toFixed(1)} · {(r.billedLiters - r.liters).toFixed(1)} short
@@ -243,6 +259,7 @@ export default async function DieselRegisterPage({
                   </TD>
                   <TD className="text-right font-mono tabular-nums text-danger">
                     {r.type === "OUTWARD" ? r.liters.toFixed(1) : ""}
+                    {r.type === "ADJUSTMENT" && r.liters < 0 ? (-r.liters).toFixed(1) : ""}
                   </TD>
                   <TD className="text-right font-mono tabular-nums text-ink-2">
                     {r.type === "OUTWARD"
